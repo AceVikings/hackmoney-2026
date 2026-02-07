@@ -32,23 +32,6 @@ export function fetchAgents() {
   return request<Agent[]>('/agents');
 }
 
-export function fetchAgent(id: string) {
-  return request<Agent>(`/agents/${id}`);
-}
-
-export function registerAgent(data: {
-  ensName: string;
-  walletAddress: string;
-  role: string;
-  skills?: string[];
-  maxLiability?: number;
-}) {
-  return request<Agent>('/agents', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-}
-
 // ── Task endpoints ───────────────────────────────────
 
 export interface Task {
@@ -60,10 +43,29 @@ export interface Task {
   creatorAddress: string;
   assignedAgents: string[];
   createdAt: string;
+  workResults?: {
+    agentId: string;
+    result: any;
+    submittedAt: string;
+  }[];
+  hasResults?: boolean;
 }
 
-export function fetchTasks() {
-  return request<Task[]>('/tasks');
+export interface Activity {
+  id: string;
+  agentId: string;
+  taskId: string;
+  action: string;
+  timestamp: string;
+}
+
+export function fetchTasks(address?: string) {
+  const query = address ? `?address=${address}` : '';
+  return request<Task[]>(`/tasks${query}`);
+}
+
+export function fetchActivityFeed() {
+  return request<Activity[]>('/tasks/activity/feed');
 }
 
 export function createTask(data: {

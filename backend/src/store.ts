@@ -20,20 +20,23 @@ export interface Task {
   creatorAddress: string;
   assignedAgents: string[];
   createdAt: string;
+  workResults?: {
+    agentId: string;
+    result: any;
+    submittedAt: string;
+  }[];
 }
 
-export interface Commitment {
+export interface Activity {
   id: string;
+  agentId: string;
   taskId: string;
-  parentAgentId: string | null;
-  childAgentId: string;
-  amount: number;
-  reversalDeadline: string;
-  status: 'pending' | 'active' | 'reversed' | 'finalized';
-  channelId: string | null;
+  action: string;
+  timestamp: string;
 }
 
 // In-memory stores
 export const agents: Map<string, Agent> = new Map();
 export const tasks: Map<string, Task> = new Map();
 export const commitments: Map<string, Commitment> = new Map();
+export const activities: Activity[] = [];
