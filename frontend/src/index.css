@@ -1,1 +1,79 @@
 @import "tailwindcss";
+
+/* ───── Art Deco Design Tokens ───── */
+@theme {
+  --color-obsidian: #0A0A0A;
+  --color-charcoal: #141414;
+  --color-gold: #D4AF37;
+  --color-gold-light: #F2E8C4;
+  --color-cream: #F2F0E4;
+  --color-midnight: #1E3D59;
+  --color-pewter: #888888;
+}
+
+/* ───── Base ───── */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  font-family: "Josefin Sans", sans-serif;
+  background-color: var(--color-obsidian);
+  color: var(--color-cream);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Diagonal crosshatch background pattern */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 40px,
+      rgba(212, 175, 55, 0.03) 40px,
+      rgba(212, 175, 55, 0.03) 41px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      transparent,
+      transparent 40px,
+      rgba(212, 175, 55, 0.03) 40px,
+      rgba(212, 175, 55, 0.03) 41px
+    );
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+}
+
+/* ───── Typography ───── */
+h1, h2, h3, h4, h5, h6 {
+  font-family: "Marcellus", serif;
+}
+
+/* ───── Scrollbar ───── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-obsidian);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(212, 175, 55, 0.3);
+}
+
+/* ───── Selection ───── */
+::selection {
+  background: rgba(212, 175, 55, 0.3);
+  color: var(--color-cream);
+}
