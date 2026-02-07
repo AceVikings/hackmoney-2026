@@ -18,10 +18,8 @@ export default function Header() {
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
         {/* ── Logo ── */}
         <Link to="/" className="flex items-center gap-3 group">
-          <div className="relative flex h-9 w-9 items-center justify-center rotate-45 border border-gold/60 group-hover:border-gold transition-colors duration-300">
-            <span className="-rotate-45 font-[Marcellus] text-sm text-gold tracking-widest">
-              A
-            </span>
+          <div className="relative flex h-9 w-9 items-center justify-center group-hover:scale-105 transition-transform duration-300">
+            <img src="/acn-logo.svg" alt="ACN Logo" className="h-full w-full" />
           </div>
           <span className="font-[Marcellus] text-lg tracking-[0.25em] text-cream uppercase hidden sm:block">
             ACN

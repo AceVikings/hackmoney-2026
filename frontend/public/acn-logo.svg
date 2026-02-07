@@ -1,0 +1,25 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="256" height="256" fill="#0A0A0A"/>
+  
+  <!-- Outer Diamond Border -->
+  <path d="M128 32L224 128L128 224L32 128L128 32Z" stroke="#D4AF37" stroke-width="4" stroke-linejoin="round"/>
+  
+  <!-- Inner Decorative Diamond -->
+  <path d="M128 64L192 128L128 192L64 128L128 64Z" stroke="#D4AF37" stroke-width="1.5" stroke-dasharray="4 4"/>
+  
+  <!-- "A" Initial - Art Deco Style -->
+  <path d="M128 85L150 145H106L128 85Z" fill="#D4AF37"/>
+  <rect x="110" y="145" width="36" height="4" fill="#D4AF37"/>
+  <path d="M110 149V165" stroke="#D4AF37" stroke-width="3"/>
+  <path d="M146 149V165" stroke="#D4AF37" stroke-width="3"/>
+  
+  <!-- Corner Accents -->
+  <path d="M32 128L48 112" stroke="#D4AF37" stroke-width="2"/>
+  <path d="M32 128L48 144" stroke="#D4AF37" stroke-width="2"/>
+  <path d="M224 128L208 112" stroke="#D4AF37" stroke-width="2"/>
+  <path d="M224 128L208 144" stroke="#D4AF37" stroke-width="2"/>
+  <path d="M128 32L112 48" stroke="#D4AF37" stroke-width="2"/>
+  <path d="M128 32L144 48" stroke="#D4AF37" stroke-width="2"/>
+  <path d="M128 224L112 208" stroke="#D4AF37" stroke-width="2"/>
+  <path d="M128 224L144 208" stroke="#D4AF37" stroke-width="2"/>
+</svg>
