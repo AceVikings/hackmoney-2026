@@ -6,7 +6,7 @@ import {
 } from "../base-agent/index.js";
 import { chatCompletion } from "../lib/openai.js";
 
-const MODEL = "gpt-5-nano";
+const MODEL = "gpt-4o-mini";
 
 /**
  * BulletPointAgent — Converts long text into structured bullet point lists.

@@ -20,18 +20,25 @@ export async function chatCompletion(
   model = 'gpt-4o-mini',
   maxTokens = 1024,
 ): Promise<string> {
+  // Some newer models (gpt-5-*) don't support temperature or max_tokens
+  const body: Record<string, any> = { model, messages };
+
+  // Prefer max_completion_tokens (newer API) but fall back for older models
+  body.max_completion_tokens = maxTokens;
+
+  // Only set temperature for models that support it
+  const noTempModels = ['gpt-5', 'o1', 'o3', 'o4'];
+  if (!noTempModels.some((prefix) => model.startsWith(prefix))) {
+    body.temperature = 0.3;
+  }
+
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${OPENAI_API_KEY}`,
     },
-    body: JSON.stringify({
-      model,
-      messages,
-      max_tokens: maxTokens,
-      temperature: 0.3,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {

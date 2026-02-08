@@ -1,5 +1,9 @@
 import dotenv from 'dotenv';
-dotenv.config();
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3001/api';
 const POLL_INTERVAL = parseInt(process.env.AGENT_POLL_INTERVAL_MS || '4000', 10);

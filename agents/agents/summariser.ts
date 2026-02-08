@@ -6,7 +6,7 @@ import {
 } from "../base-agent/index.js";
 import { chatCompletion } from "../lib/openai.js";
 
-const MODEL = "gpt-5-nano";
+const MODEL = "gpt-4o-mini";
 
 /**
  * SummariserAgent — Summarizes long text into concise summaries.

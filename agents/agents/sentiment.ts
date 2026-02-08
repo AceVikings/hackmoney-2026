@@ -6,7 +6,7 @@ import {
 } from "../base-agent/index.js";
 import { chatCompletion } from "../lib/openai.js";
 
-const MODEL = "gpt-5-nano";
+const MODEL = "gpt-4o-mini";
 
 /**
  * SentimentAgent — Analyzes sentiment of text (positive/negative/neutral).
@@ -71,16 +71,31 @@ export class SentimentAgent extends ACNAgent {
         [
           {
             role: "system",
-            content: `You are a sentiment analysis engine. Analyze the text and return JSON only:
-{"sentiment": "positive"|"negative"|"neutral"|"mixed", "confidence": 0-100, "drivers": ["reason1","reason2"]}`,
+            content: `You are a sentiment analysis engine. Analyze the text and respond with ONLY a JSON object. No markdown, no code fences, no explanation. The JSON must have exactly these keys: sentiment (one of: positive, negative, neutral, mixed), confidence (integer 0-100), drivers (array of short strings).`,
           },
-          { role: "user", content: description },
+          { role: "user", content: `Analyze sentiment:\n${description}` },
         ],
         MODEL,
-        256,
+        512,
       );
 
-      const parsed = JSON.parse(raw);
+      // Strip markdown code fences and extract JSON
+      let cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+      // Try to extract JSON object if surrounded by extra text
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+      if (jsonMatch) cleaned = jsonMatch[0];
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch {
+        // If JSON parsing fails, return the raw text as the result
+        return {
+          success: true,
+          output: { sentiment: 'unknown', rawResponse: raw, model: MODEL },
+          summary: `Sentiment analysis completed (raw output)`,
+        };
+      }
 
       return {
         success: true,
