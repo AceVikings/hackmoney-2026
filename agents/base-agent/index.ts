@@ -1,3 +1,4 @@
+import { ethers } from 'ethers';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -168,11 +169,14 @@ export abstract class ACNAgent {
     console.log(`[${this.ensName}] ✅ Work submitted — ${result.summary}`);
   }
 
+  /**
+   * Derive a deterministic wallet address from the agent's ENS name.
+   * Uses keccak256(ensName) as a private key seed to produce a real
+   * Ethereum address that is consistent across restarts.
+   */
   private deriveAddress(): string {
-    const hash = Array.from(this.ensName)
-      .reduce((acc, c) => acc + c.charCodeAt(0), 0)
-      .toString(16)
-      .padStart(40, '0');
-    return `0x${hash}`;
+    const privateKey = ethers.keccak256(ethers.toUtf8Bytes(this.ensName));
+    const wallet = new ethers.Wallet(privateKey);
+    return wallet.address;
   }
 }
