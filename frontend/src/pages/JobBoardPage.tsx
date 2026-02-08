@@ -10,6 +10,8 @@ import {
   ChevronUp,
   CheckCircle,
   PlusCircle,
+  Shield,
+  Hash,
 } from 'lucide-react';
 import Card, { CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import SectionHeading from '../components/ui/SectionHeading';
@@ -97,10 +99,23 @@ function PostingCard({
 }) {
   const [expanded, setExpanded] = useState(posting.bids.length > 0);
 
+  // Only the original poster can accept bids
+  const isCreator =
+    !!address &&
+    !!posting.creatorAddress &&
+    address.toLowerCase() === posting.creatorAddress.toLowerCase();
+
   const statusColor: Record<string, string> = {
     open: 'text-emerald-400 bg-emerald-500/10',
     assigned: 'text-amber-400 bg-amber-500/10',
     closed: 'text-pewter bg-pewter/10',
+  };
+
+  const escrowColor: Record<string, string> = {
+    none: 'text-pewter',
+    held: 'text-amber-400',
+    released: 'text-emerald-400',
+    refunded: 'text-red-400',
   };
 
   return (
@@ -108,11 +123,21 @@ function PostingCard({
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <CardTitle>{posting.title}</CardTitle>
-          <span
-            className={`shrink-0 px-2 py-0.5 text-[10px] uppercase tracking-wider ${statusColor[posting.status] ?? 'text-pewter'}`}
-          >
-            {posting.status}
-          </span>
+          <div className="flex items-center gap-2">
+            {posting.escrowStatus && posting.escrowStatus !== 'none' && (
+              <span
+                className={`shrink-0 flex items-center gap-1 px-2 py-0.5 text-[10px] uppercase tracking-wider ${escrowColor[posting.escrowStatus] ?? 'text-pewter'}`}
+              >
+                <Shield size={10} />
+                {posting.escrowStatus}
+              </span>
+            )}
+            <span
+              className={`shrink-0 px-2 py-0.5 text-[10px] uppercase tracking-wider ${statusColor[posting.status] ?? 'text-pewter'}`}
+            >
+              {posting.status}
+            </span>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -138,11 +163,42 @@ function PostingCard({
             <DollarSign size={12} className="text-gold/60" />
             {posting.budget} USDC
           </span>
+          {posting.escrowAmount != null && posting.escrowAmount > 0 && (
+            <span className="flex items-center gap-1">
+              <Shield size={12} className="text-gold/60" />
+              {posting.escrowAmount} escrowed
+            </span>
+          )}
           <span className="flex items-center gap-1">
             <Clock size={12} className="text-gold/60" />
             {new Date(posting.postedAt).toLocaleString()}
           </span>
         </div>
+
+        {/* Creator badge */}
+        {isCreator && (
+          <p className="text-[10px] text-gold/60 uppercase tracking-wider">
+            ▸ Your posting
+          </p>
+        )}
+
+        {/* Escrow tx hash */}
+        {posting.escrowTxHash && (
+          <div className="flex items-center gap-2 bg-amber-500/5 border border-amber-500/20 px-3 py-2 text-xs">
+            <Shield size={12} className="text-amber-400 shrink-0" />
+            <span className="text-[10px] text-pewter uppercase tracking-wider mr-2">Escrow</span>
+            <span className="text-amber-400 font-mono truncate">{posting.escrowTxHash}</span>
+          </div>
+        )}
+
+        {/* Settlement hash */}
+        {posting.settlementHash && (
+          <div className="flex items-center gap-2 bg-emerald-500/5 border border-emerald-500/20 px-3 py-2 text-xs">
+            <Hash size={12} className="text-emerald-400 shrink-0" />
+            <span className="text-[10px] text-pewter uppercase tracking-wider mr-2">Settlement</span>
+            <span className="text-emerald-400 font-mono truncate">{posting.settlementHash}</span>
+          </div>
+        )}
 
         {/* Bids section */}
         <button
@@ -159,7 +215,7 @@ function PostingCard({
               <BidCard
                 key={bid.id}
                 bid={bid}
-                canAccept={posting.status === 'open' && !!address}
+                canAccept={posting.status === 'open' && isCreator}
                 onAccept={() => onAccept(posting.id, bid.id)}
               />
             ))}
@@ -237,8 +293,9 @@ export default function JobBoardPage() {
   };
 
   const handleAcceptBid = async (jobId: string, bidId: string) => {
+    if (!address) return;
     try {
-      await acceptBid(jobId, bidId);
+      await acceptBid(jobId, bidId, address);
     } catch (err) {
       console.error('Failed to accept bid', err);
     }
@@ -313,9 +370,10 @@ export default function JobBoardPage() {
                       value={form.budget}
                       onChange={handleChange}
                       required
-                      min={1}
+                      min={0.01}
+                      step={0.01}
                       className="w-full bg-obsidian border border-gold/20 px-3 py-2 text-sm text-cream placeholder:text-pewter/40 focus:border-gold focus:outline-none"
-                      placeholder="100"
+                      placeholder="0.50"
                     />
                   </div>
                   <div>

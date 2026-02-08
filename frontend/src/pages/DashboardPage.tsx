@@ -6,13 +6,25 @@ import {
   Activity as ActivityIcon,
   DollarSign,
   Users,
-  Clock,
   Terminal,
+  Shield,
+  Hash,
+  Zap,
+  RefreshCw,
 } from 'lucide-react';
-import Card, { CardHeader, CardTitle, CardContent } from '../components/ui/Card';
+import Card, { CardContent } from '../components/ui/Card';
 import SectionHeading from '../components/ui/SectionHeading';
 import Button from '../components/ui/Button';
-import { fetchTasks, fetchActivityFeed, type Task, type Activity } from '../api/client';
+import {
+  fetchTasks,
+  fetchActivityFeed,
+  fetchNitroliteStatus,
+  fetchNitroliteBalances,
+  requestRefund,
+  type Task,
+  type Activity,
+  type NitroliteStatus,
+} from '../api/client';
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
@@ -37,18 +49,37 @@ export default function DashboardPage() {
   const { isConnected, address } = useAccount();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [nitroStatus, setNitroStatus] = useState<NitroliteStatus | null>(null);
+  const [nitroBalance, setNitroBalance] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (isConnected && address) {
       const load = async () => {
         try {
-          const [t, a] = await Promise.all([
+          const [t, a, ns] = await Promise.all([
             fetchTasks(address),
-            fetchActivityFeed(),
+            fetchActivityFeed(address),
+            fetchNitroliteStatus().catch(() => null),
           ]);
           setTasks(t);
           setActivities(a);
+          if (ns) {
+            setNitroStatus(ns);
+            // Fetch live balance if authenticated
+            if (ns.authenticated) {
+              try {
+                const bal = await fetchNitroliteBalances();
+                // Parse balance from RPC response
+                const raw = JSON.stringify(bal);
+                // Try to extract a human-readable balance
+                const amtMatch = raw.match(/"amount"\s*:\s*"?(\d+[\d.]*)"?/);
+                setNitroBalance(amtMatch ? amtMatch[1] : raw.slice(0, 100));
+              } catch {
+                setNitroBalance('(fetch error)');
+              }
+            }
+          }
         } catch (err) {
           console.error('Failed to load dashboard data', err);
         } finally {
@@ -81,10 +112,19 @@ export default function DashboardPage() {
 
   const stats = [
     { label: 'Active Commitments', value: tasks.filter(t => t.status !== 'completed' && t.status !== 'reversed').length.toString(), icon: ActivityIcon },
-    { label: 'Total Committed', value: `${tasks.reduce((acc, t) => acc + t.budget, 0).toLocaleString()} USDC`, icon: DollarSign },
+    { label: 'Total Escrowed', value: `${tasks.filter(t => t.escrowStatus === 'held').reduce((acc, t) => acc + (t.escrowAmount ?? 0), 0).toLocaleString()} USDC`, icon: Shield },
+    { label: 'Total Settled', value: `${tasks.filter(t => t.escrowStatus === 'released').reduce((acc, t) => acc + (t.escrowAmount ?? 0), 0).toLocaleString()} USDC`, icon: DollarSign },
     { label: 'Agents Hired', value: [...new Set(tasks.flatMap(t => t.assignedAgents))].length.toString(), icon: Users },
-    { label: 'Open Reversals', value: tasks.filter(t => t.status === 'reversed').length.toString(), icon: Clock },
   ];
+
+  const handleRefund = async (taskId: string) => {
+    if (!address) return;
+    try {
+      await requestRefund(taskId, address);
+    } catch (err) {
+      console.error('Refund failed', err);
+    }
+  };
 
   return (
     <div className="min-h-screen pt-24 pb-16 px-6">
@@ -119,7 +159,7 @@ export default function DashboardPage() {
                 Your Tasks
               </h3>
               <Button variant="outline" className="h-9 px-5 text-[10px]">
-                <Link to="/tasks/new">+ New Task</Link>
+                <Link to="/jobs">+ Post Job</Link>
               </Button>
             </div>
 
@@ -127,7 +167,7 @@ export default function DashboardPage() {
               {loading && tasks.length === 0 ? (
                 <p className="text-pewter text-sm animate-pulse">Loading tasks...</p>
               ) : tasks.length === 0 ? (
-                <p className="text-pewter text-sm">No tasks found. Create one to get started.</p>
+                <p className="text-pewter text-sm">No tasks found. Post a job to get started.</p>
               ) : (
                 tasks.map((task) => (
                   <Card key={task.id} className="group">
@@ -139,6 +179,16 @@ export default function DashboardPage() {
                           </h4>
                           <div className="flex items-center gap-4 mt-2">
                             <span className="text-xs text-gold">{task.budget} USDC</span>
+                            {task.escrowStatus && task.escrowStatus !== 'none' && (
+                              <span className={`text-xs flex items-center gap-1 ${
+                                task.escrowStatus === 'held' ? 'text-amber-400' :
+                                task.escrowStatus === 'released' ? 'text-emerald-400' :
+                                task.escrowStatus === 'refunded' ? 'text-red-400' : 'text-pewter'
+                              }`}>
+                                <Shield size={10} />
+                                {task.escrowAmount} {task.escrowStatus}
+                              </span>
+                            )}
                             <span className="text-xs text-pewter">
                               {new Date(task.createdAt).toLocaleDateString()}
                             </span>
@@ -147,7 +197,42 @@ export default function DashboardPage() {
                         <StatusBadge status={task.status} />
                       </div>
 
-                      {/* Display results only if available (requester check happens server-side) */}
+                      {/* Escrow tx hash */}
+                      {task.escrowTxHash && (
+                        <div className="mt-4 flex items-center gap-2 bg-amber-500/5 border border-amber-500/20 px-3 py-2 text-xs">
+                          <Shield size={12} className="text-amber-400 shrink-0" />
+                          <span className="text-[10px] text-pewter uppercase tracking-wider mr-2">Escrow</span>
+                          <span className="text-amber-400 font-mono truncate">{task.escrowTxHash}</span>
+                        </div>
+                      )}
+
+                      {/* Settlement hash */}
+                      {task.settlementHash && (
+                        <div className="mt-4 flex items-center gap-2 bg-emerald-500/5 border border-emerald-500/20 px-3 py-2 text-xs">
+                          <Hash size={12} className="text-emerald-400 shrink-0" />
+                          <span className="text-[10px] text-pewter uppercase tracking-wider mr-2">Settlement</span>
+                          <span className="text-emerald-400 font-mono truncate">{task.settlementHash}</span>
+                          {task.settledAt && (
+                            <span className="text-pewter text-[10px] ml-auto shrink-0">
+                              {new Date(task.settledAt).toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Refund button for held escrow tasks */}
+                      {task.escrowStatus === 'held' && (task.status === 'open' || task.status === 'in-progress') && (
+                        <div className="mt-3">
+                          <button
+                            onClick={() => handleRefund(task.id)}
+                            className="flex items-center gap-1 text-[10px] text-red-400 hover:text-red-300 uppercase tracking-wider transition-colors"
+                          >
+                            <RefreshCw size={10} /> Request Refund
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Display results only if available */}
                       {task.workResults && task.workResults.length > 0 && (
                         <div className="mt-6 pt-6 border-t border-gold/10">
                           <p className="text-[10px] uppercase tracking-[0.2em] text-gold mb-4">Work Results</p>
@@ -163,12 +248,6 @@ export default function DashboardPage() {
                           </div>
                         </div>
                       )}
-
-                      {task.hasResults && !task.workResults && (
-                        <p className="mt-4 text-[10px] text-pewter italic">
-                          Results are available but hidden (only visible to requester).
-                        </p>
-                      )}
                     </CardContent>
                   </Card>
                 ))
@@ -176,33 +255,85 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* ── Activity Feed (Right 1/3) ── */}
-          <div>
-            <div className="mb-8">
-              <h3 className="font-[Marcellus] text-lg uppercase tracking-[0.15em] text-cream">
-                Network Activity
-              </h3>
+          {/* ── Right sidebar ── */}
+          <div className="space-y-10">
+            {/* ── Nitrolite Status ── */}
+            <div>
+              <div className="mb-6">
+                <h3 className="font-[Marcellus] text-lg uppercase tracking-[0.15em] text-cream flex items-center gap-2">
+                  <Zap size={16} className="text-gold" /> Yellow Network
+                </h3>
+              </div>
+              <Card hover={false}>
+                <CardContent className="space-y-3">
+                  {nitroStatus ? (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase tracking-wider text-pewter">Status</span>
+                        <span className={`text-[10px] uppercase tracking-wider ${nitroStatus.authenticated ? 'text-emerald-400' : nitroStatus.connected ? 'text-amber-400' : 'text-red-400'}`}>
+                          {nitroStatus.authenticated ? '● Connected' : nitroStatus.connected ? '● Connecting' : '● Offline'}
+                        </span>
+                      </div>
+                      {nitroStatus.address && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] uppercase tracking-wider text-pewter">Wallet</span>
+                          <span className="text-[10px] text-cream font-mono">
+                            {nitroStatus.address.slice(0, 6)}…{nitroStatus.address.slice(-4)}
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase tracking-wider text-pewter">Protocol</span>
+                        <span className="text-[10px] text-gold">Nitrolite / ERC-7824</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase tracking-wider text-pewter">Environment</span>
+                        <span className="text-[10px] text-pewter">ClearNode Sandbox</span>
+                      </div>
+                      {nitroBalance && (
+                        <div className="flex items-center justify-between pt-2 border-t border-gold/10">
+                          <span className="text-[10px] uppercase tracking-wider text-pewter">Balance</span>
+                          <span className="text-[10px] text-emerald-400 font-mono">{nitroBalance} ytest.usd</span>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-pewter">Loading Nitrolite status…</p>
+                  )}
+                </CardContent>
+              </Card>
             </div>
-            <div className="space-y-6 relative before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-px before:bg-gold/10">
-              {activities.map((act) => (
-                <div key={act.id} className="relative pl-8">
-                  <div className="absolute left-0 top-1 h-[22px] w-[22px] rotate-45 border border-gold/30 bg-obsidian flex items-center justify-center">
-                    <Terminal size={10} className="-rotate-45 text-gold/60" />
+
+            {/* ── Activity Feed ── */}
+            <div>
+              <div className="mb-6">
+                <h3 className="font-[Marcellus] text-lg uppercase tracking-[0.15em] text-cream">
+                  Your Activity
+                </h3>
+              </div>
+              <div className="space-y-6 relative before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-px before:bg-gold/10">
+                {activities.map((act) => (
+                  <div key={act.id} className="relative pl-8">
+                    <div className="absolute left-0 top-1 h-[22px] w-[22px] rotate-45 border border-gold/30 bg-obsidian flex items-center justify-center">
+                      <Terminal size={10} className="-rotate-45 text-gold/60" />
+                    </div>
+                    <p className="text-[11px] text-cream uppercase tracking-wider">
+                      {act.agentId === 'SYSTEM' || act.agentId === 'NITROLITE' ? (
+                        <span className="text-gold">{act.agentId}</span>
+                      ) : (
+                        <>Agent <span className="text-gold">{act.agentId.slice(0, 8)}</span></>
+                      )}
+                    </p>
+                    <p className="text-[10px] text-pewter mt-1">{act.action}</p>
+                    <p className="text-[9px] text-gold/40 font-mono mt-1">
+                      {act.taskId.slice(0, 12)}…
+                    </p>
                   </div>
-                  <p className="text-[11px] text-cream uppercase tracking-wider">
-                    Agent <span className="text-gold">{act.agentId.slice(0, 8)}</span>
-                  </p>
-                  <p className="text-[10px] text-pewter mt-1">
-                    {act.action === 'SUBMITTED_WORK' ? 'Submitted work proof for task' : act.action}
-                  </p>
-                  <p className="text-[9px] text-gold/40 font-mono mt-1">
-                    {act.taskId.slice(0, 12)}...
-                  </p>
-                </div>
-              ))}
-              {activities.length === 0 && (
-                <p className="text-pewter text-[10px] pl-8">No recent activity.</p>
-              )}
+                ))}
+                {activities.length === 0 && (
+                  <p className="text-pewter text-[10px] pl-8">No activity yet.</p>
+                )}
+              </div>
             </div>
           </div>
         </div>

@@ -49,6 +49,13 @@ export interface Task {
     submittedAt: string;
   }[];
   hasResults?: boolean;
+  // Escrow / settlement
+  escrowAmount?: number;
+  escrowStatus?: 'none' | 'held' | 'released' | 'refunded';
+  escrowTxHash?: string | null;
+  settlementHash?: string | null;
+  settlementTxId?: string | null;
+  settledAt?: string | null;
 }
 
 export interface Activity {
@@ -64,8 +71,9 @@ export function fetchTasks(address?: string) {
   return request<Task[]>(`/tasks${query}`);
 }
 
-export function fetchActivityFeed() {
-  return request<Activity[]>('/tasks/activity/feed');
+export function fetchActivityFeed(address?: string) {
+  const query = address ? `?address=${address}` : '';
+  return request<Activity[]>(`/tasks/activity/feed${query}`);
 }
 
 export function createTask(data: {
@@ -145,6 +153,11 @@ export interface JobPostingWithBids {
   requiredSkills: string[];
   postedAt: string;
   status: 'open' | 'assigned' | 'closed';
+  creatorAddress: string;
+  escrowStatus?: 'none' | 'held' | 'released' | 'refunded';
+  escrowAmount?: number;
+  escrowTxHash?: string | null;
+  settlementHash?: string | null;
   bids: JobBid[];
 }
 
@@ -169,9 +182,36 @@ export function createJobPosting(data: {
   });
 }
 
-export function acceptBid(jobId: string, bidId: string) {
+export function acceptBid(jobId: string, bidId: string, callerAddress: string) {
   return request<{ posting: JobPostingWithBids; bid: JobBid }>(`/jobboard/${jobId}/accept`, {
     method: 'POST',
-    body: JSON.stringify({ bidId }),
+    body: JSON.stringify({ bidId, callerAddress }),
+  });
+}
+
+// ── Nitrolite endpoints ──────────────────────────────
+
+export interface NitroliteStatus {
+  enabled: boolean;
+  connected: boolean;
+  authenticated: boolean;
+  address?: string;
+  sessionKeyAddress?: string;
+  clearNodeUrl?: string;
+  message?: string;
+}
+
+export function fetchNitroliteStatus() {
+  return request<NitroliteStatus>('/nitrolite/status');
+}
+
+export function fetchNitroliteBalances() {
+  return request<any>('/nitrolite/balances');
+}
+
+export function requestRefund(taskId: string, callerAddress: string) {
+  return request<Task>(`/tasks/${taskId}/refund`, {
+    method: 'POST',
+    body: JSON.stringify({ callerAddress }),
   });
 }
