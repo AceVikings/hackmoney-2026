@@ -86,23 +86,30 @@ jobBoardRouter.post('/', async (req, res) => {
   // Perform Nitrolite escrow transfer — lock funds in state channel
   const svc = getNitroliteService();
   let escrowTxHash: string | null = null;
-  if (svc?.isAuthenticated) {
-    try {
-      console.log(`[Escrow] 🔒 Locking ${budget} ${ESCROW_ASSET} for task ${task._id}…`);
-      const escrowResult = await svc.transfer(
-        svc.address as `0x${string}`,
-        ESCROW_ASSET,
-        String(budget),
-      );
-      escrowTxHash = `escrow_${Date.now().toString(36)}_${task._id!.toString().slice(-8)}`;
-      const rawEscrow = JSON.stringify(escrowResult);
-      task.escrowTxHash = escrowTxHash;
-      task.settlementTxId = rawEscrow.slice(0, 200);
-      await task.save();
-      console.log(`[Escrow] ✅ Escrow locked — hash: ${escrowTxHash}`);
-    } catch (err: any) {
-      console.warn('[Escrow] Transfer failed (non-fatal):', err.message);
-      // Generate a simulated hash so the UI still shows the escrow
+  if (svc) {
+    // Wait for auth if WS is reconnecting
+    const authed = svc.isAuthenticated || await svc.waitForAuth(8000);
+    if (authed) {
+      try {
+        console.log(`[Escrow] 🔒 Locking ${budget} ${ESCROW_ASSET} for task ${task._id}…`);
+        const escrowResult = await svc.transfer(
+          svc.address as `0x${string}`,
+          ESCROW_ASSET,
+          String(budget),
+        );
+        escrowTxHash = `escrow_${Date.now().toString(36)}_${task._id!.toString().slice(-8)}`;
+        const rawEscrow = JSON.stringify(escrowResult);
+        task.escrowTxHash = escrowTxHash;
+        task.settlementTxId = rawEscrow.slice(0, 200);
+        await task.save();
+        console.log(`[Escrow] ✅ Escrow locked — hash: ${escrowTxHash}`);
+      } catch (err: any) {
+        console.warn('[Escrow] Transfer failed (non-fatal):', err.message);
+        escrowTxHash = `escrow_sim_${Date.now().toString(36)}_${task._id!.toString().slice(-8)}`;
+        task.escrowTxHash = escrowTxHash;
+        await task.save();
+      }
+    } else {
       escrowTxHash = `escrow_sim_${Date.now().toString(36)}_${task._id!.toString().slice(-8)}`;
       task.escrowTxHash = escrowTxHash;
       await task.save();

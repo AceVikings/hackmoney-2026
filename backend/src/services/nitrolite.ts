@@ -59,8 +59,9 @@ interface SessionKey {
 
 // ── Constants ──────────────────────────────────────────
 
-const MAX_RECONNECT_ATTEMPTS = 3;
+const MAX_RECONNECT_ATTEMPTS = 10;
 const AUTH_TIMEOUT_MS = 15_000;
+const PING_INTERVAL_MS = 25_000; // keep-alive ping every 25s
 const SESSION_DURATION = 86400; // 24 hours
 const APP_NAME = 'ACN';
 const AUTH_SCOPE = 'console';
@@ -75,6 +76,7 @@ export class NitroliteService {
   private authenticated = false;
   private pendingRequests = new Map<number, PendingRequest>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectAttempts = 0;
 
   // Session key — ephemeral key used for post-auth RPC signing
@@ -136,6 +138,7 @@ export class NitroliteService {
       this.ws.on('close', () => {
         console.log('[Nitrolite] WebSocket closed');
         this.authenticated = false;
+        this.stopPing();
         if (!this.reconnectTimer && this.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
           this.reconnectAttempts++;
           const delay = 5_000 * this.reconnectAttempts;
@@ -207,6 +210,7 @@ export class NitroliteService {
         console.log('[Nitrolite] ✅ Authenticated with ClearNode');
         this.authenticated = true;
         this.reconnectAttempts = 0;
+        this.startPing();
         this._authResolve?.();
         return;
       }
@@ -295,6 +299,36 @@ export class NitroliteService {
   }
 
   // ── RPC helpers ──
+
+  /** Keep-alive: ping the WebSocket to avoid idle disconnects */
+  private startPing(): void {
+    this.stopPing();
+    this.pingTimer = setInterval(() => {
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        this.ws.ping();
+      }
+    }, PING_INTERVAL_MS);
+  }
+
+  private stopPing(): void {
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
+  }
+
+  /**
+   * Wait up to `ms` for authentication to complete (useful when WS is reconnecting).
+   */
+  async waitForAuth(ms = 10_000): Promise<boolean> {
+    if (this.authenticated) return true;
+    const start = Date.now();
+    while (Date.now() - start < ms) {
+      await new Promise((r) => setTimeout(r, 500));
+      if (this.authenticated) return true;
+    }
+    return false;
+  }
 
   private send(msg: string | object): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
@@ -397,6 +431,7 @@ export class NitroliteService {
 
   /** Graceful disconnect */
   disconnect(): void {
+    this.stopPing();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

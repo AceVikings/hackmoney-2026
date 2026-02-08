@@ -149,7 +149,10 @@ taskRouter.post('/:id/work', async (req, res) => {
   let settlementHash: string | null = null;
   let settlementTxId: string | null = null;
 
-  if (svc?.isAuthenticated && task.escrowStatus === 'held') {
+  // Wait for auth if WS is reconnecting
+  const authed = svc ? (svc.isAuthenticated || await svc.waitForAuth(8000)) : false;
+
+  if (authed && svc && task.escrowStatus === 'held') {
     try {
       console.log(`[Settlement] 💸 Settling ${task.escrowAmount} ${SETTLEMENT_ASSET} for task ${task._id}…`);
 
@@ -192,7 +195,7 @@ taskRouter.post('/:id/work', async (req, res) => {
         action: `SETTLEMENT_FAILED — ${err.message}`,
       });
     }
-  } else if (!svc?.isAuthenticated) {
+  } else if (!authed) {
     // Nitrolite offline — simulate settlement for demo
     settlementHash = `sim_${Date.now().toString(36)}_${task._id!.toString().slice(-8)}`;
     task.escrowStatus = 'released';
