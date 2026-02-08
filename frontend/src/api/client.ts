@@ -26,10 +26,47 @@ export interface Agent {
   reputation: number;
   active: boolean;
   registeredAt: string;
+  // ENS subname registration
+  subnameRegistered?: boolean;
+  subnameNode?: string | null;
+  subnameTxHash?: string | null;
+  tasksCompleted?: number;
+  tasksFailed?: number;
 }
 
 export function fetchAgents() {
   return request<Agent[]>('/agents');
+}
+
+// ── ENS endpoints ────────────────────────────────────
+
+export interface ENSSubnameInfo {
+  label: string;
+  fullName: string;
+  owner: string;
+  node: string;
+  textRecords: Record<string, string>;
+}
+
+export interface ENSStatus {
+  contract: string;
+  wallet: string;
+  chain: number;
+  rpc: string;
+  explorer: string;
+  totalRegistered: number;
+}
+
+export function fetchENSStatus() {
+  return request<ENSStatus>('/ens/status');
+}
+
+export function fetchENSLookup(ensName: string) {
+  return request<ENSSubnameInfo>(`/ens/lookup/${ensName}`);
+}
+
+export function fetchENSRecords(ensName: string) {
+  return request<{ ensName: string; node: string; records: Record<string, string> }>(`/ens/records/${ensName}`);
 }
 
 // ── Task endpoints ───────────────────────────────────

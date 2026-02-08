@@ -1,8 +1,10 @@
-import { Bot, ExternalLink } from 'lucide-react';
+import { Bot, ExternalLink, ShieldCheck, BookOpen } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import Card, { CardHeader, CardTitle, CardDescription, CardContent } from '../components/ui/Card';
 import SectionHeading from '../components/ui/SectionHeading';
-import { fetchAgents, type Agent } from '../api/client';
+import { fetchAgents, fetchENSRecords, type Agent } from '../api/client';
+
+const EXPLORER = 'https://testnet.arcscan.app';
 
 function ReputationBar({ score }: { score: number }) {
   return (
@@ -20,15 +22,103 @@ function ReputationBar({ score }: { score: number }) {
   );
 }
 
+function ENSBadge({ agent, records }: { agent: Agent; records: Record<string, string> | null }) {
+  if (!agent.subnameRegistered) return null;
+
+  return (
+    <div className="mt-3 p-2.5 border border-gold/10 bg-gold/[0.02] space-y-2">
+      {/* ENS name + verified badge */}
+      <div className="flex items-center gap-1.5">
+        <ShieldCheck size={12} className="text-gold/70" />
+        <span className="text-[10px] uppercase tracking-[0.15em] text-gold/70">
+          On-chain Identity
+        </span>
+      </div>
+
+      {/* Text records from chain */}
+      {records && (
+        <div className="space-y-1">
+          {records['acn.role'] && (
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] text-pewter/60 w-16">role</span>
+              <span className="text-[11px] text-cream/80">{records['acn.role']}</span>
+            </div>
+          )}
+          {records['acn.skills'] && (
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] text-pewter/60 w-16">skills</span>
+              <span className="text-[11px] text-cream/80">{records['acn.skills']}</span>
+            </div>
+          )}
+          {records['acn.reputation'] && (
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] text-pewter/60 w-16">rep</span>
+              <span className="text-[11px] text-gold font-medium">{records['acn.reputation']}/100</span>
+            </div>
+          )}
+          {(records['acn.tasksCompleted'] || records['acn.tasksFailed']) && (
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] text-pewter/60 w-16">tasks</span>
+              <span className="text-[11px] text-cream/80">
+                {records['acn.tasksCompleted'] || '0'}✓ {records['acn.tasksFailed'] || '0'}✗
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Explorer links */}
+      <div className="flex items-center gap-3 pt-1 border-t border-gold/5">
+        {agent.subnameTxHash && (
+          <a
+            href={`${EXPLORER}/tx/${agent.subnameTxHash}`}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1 text-[9px] text-pewter/50 hover:text-gold transition-colors"
+          >
+            <BookOpen size={9} />
+            registration tx
+          </a>
+        )}
+        {agent.subnameNode && (
+          <span className="text-[9px] text-pewter/30 font-mono truncate" title={agent.subnameNode}>
+            {agent.subnameNode.slice(0, 10)}…
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [ensRecords, setEnsRecords] = useState<Record<string, Record<string, string>>>({});
 
   useEffect(() => {
     const load = async () => {
       try {
         const data = await fetchAgents();
         setAgents(data);
+
+        // Fetch ENS text records for registered agents
+        const recordPromises = data
+          .filter((a) => a.subnameRegistered)
+          .map(async (a) => {
+            try {
+              const res = await fetchENSRecords(a.ensName);
+              return { ensName: a.ensName, records: res.records };
+            } catch {
+              return null;
+            }
+          });
+
+        const results = await Promise.all(recordPromises);
+        const recordsMap: Record<string, Record<string, string>> = {};
+        for (const r of results) {
+          if (r) recordsMap[r.ensName] = r.records;
+        }
+        setEnsRecords(recordsMap);
       } catch (err) {
         console.error('Failed to fetch agents', err);
       } finally {
@@ -36,7 +126,7 @@ export default function AgentsPage() {
       }
     };
     load();
-    const interval = setInterval(load, 5000);
+    const interval = setInterval(load, 8000);
     return () => clearInterval(interval);
   }, []);
 
@@ -45,7 +135,7 @@ export default function AgentsPage() {
       <div className="mx-auto max-w-6xl">
         <SectionHeading
           title="Agent Registry"
-          subtitle="Discover agents registered via EIP-8004. Each agent owns an ENS identity with on-chain reputation."
+          subtitle="Discover agents registered via EIP-8004. Each agent owns an ENS subname with on-chain reputation stored as text records."
         />
 
         {loading && agents.length === 0 ? (
@@ -64,7 +154,12 @@ export default function AgentsPage() {
                         <Bot size={16} className="-rotate-45 text-gold" />
                       </div>
                       <div>
-                        <CardTitle className="!text-base">{agent.ensName}</CardTitle>
+                        <div className="flex items-center gap-1.5">
+                          <CardTitle className="!text-base">{agent.ensName}</CardTitle>
+                          {agent.subnameRegistered && (
+                            <ShieldCheck size={13} className="text-gold/60" title="ENS subname verified on-chain" />
+                          )}
+                        </div>
                         <CardDescription>{agent.role}</CardDescription>
                       </div>
                     </div>
@@ -93,7 +188,7 @@ export default function AgentsPage() {
                         </p>
                       </div>
                       <a 
-                        href={`https://etherscan.io/address/${agent.walletAddress}`} 
+                        href={`${EXPLORER}/address/${agent.walletAddress}`} 
                         target="_blank" 
                         rel="noreferrer"
                         className="text-pewter hover:text-gold transition-colors duration-300"
@@ -101,6 +196,12 @@ export default function AgentsPage() {
                         <ExternalLink size={14} />
                       </a>
                     </div>
+
+                    {/* ENS on-chain identity badge */}
+                    <ENSBadge
+                      agent={agent}
+                      records={ensRecords[agent.ensName] ?? null}
+                    />
                   </div>
                 </CardContent>
               </Card>

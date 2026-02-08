@@ -11,6 +11,7 @@ import {
   Hash,
   Zap,
   RefreshCw,
+  ExternalLink,
 } from 'lucide-react';
 import Card, { CardContent } from '../components/ui/Card';
 import SectionHeading from '../components/ui/SectionHeading';
@@ -202,7 +203,19 @@ export default function DashboardPage() {
                         <div className="mt-4 flex items-center gap-2 bg-amber-500/5 border border-amber-500/20 px-3 py-2 text-xs">
                           <Shield size={12} className="text-amber-400 shrink-0" />
                           <span className="text-[10px] text-pewter uppercase tracking-wider mr-2">Escrow</span>
-                          <span className="text-amber-400 font-mono truncate">{task.escrowTxHash}</span>
+                          {task.escrowTxHash.startsWith('0x') ? (
+                            <a
+                              href={`https://testnet.arcscan.app/tx/${task.escrowTxHash}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-amber-400 font-mono truncate hover:text-amber-300 transition-colors flex items-center gap-1"
+                            >
+                              {task.escrowTxHash.slice(0, 10)}…{task.escrowTxHash.slice(-8)}
+                              <ExternalLink size={10} className="shrink-0" />
+                            </a>
+                          ) : (
+                            <span className="text-amber-400 font-mono truncate">{task.escrowTxHash}</span>
+                          )}
                         </div>
                       )}
 
@@ -211,7 +224,19 @@ export default function DashboardPage() {
                         <div className="mt-4 flex items-center gap-2 bg-emerald-500/5 border border-emerald-500/20 px-3 py-2 text-xs">
                           <Hash size={12} className="text-emerald-400 shrink-0" />
                           <span className="text-[10px] text-pewter uppercase tracking-wider mr-2">Settlement</span>
-                          <span className="text-emerald-400 font-mono truncate">{task.settlementHash}</span>
+                          {task.settlementHash.startsWith('0x') ? (
+                            <a
+                              href={`https://testnet.arcscan.app/tx/${task.settlementHash}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-emerald-400 font-mono truncate hover:text-emerald-300 transition-colors flex items-center gap-1"
+                            >
+                              {task.settlementHash.slice(0, 10)}…{task.settlementHash.slice(-8)}
+                              <ExternalLink size={10} className="shrink-0" />
+                            </a>
+                          ) : (
+                            <span className="text-emerald-400 font-mono truncate">{task.settlementHash}</span>
+                          )}
                           {task.settledAt && (
                             <span className="text-pewter text-[10px] ml-auto shrink-0">
                               {new Date(task.settledAt).toLocaleString()}
