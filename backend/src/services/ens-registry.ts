@@ -1,51 +1,63 @@
 /**
- * On-chain ENS Registry Service — Arc Testnet
+ * On-chain ENS Subname Service — Ethereum Sepolia
  *
- * Interacts with the ACNRegistry smart contract to:
- *   1. Register subnames (e.g. "summariser.acn.eth") when agents join
- *   2. Set/read text records (reputation, role, skills) — ENSIP-5 pattern
+ * Interacts with the ACNSubnameRegistrar deployed on Sepolia to:
+ *   1. Register real ENS subnames (e.g. "summariser.acn.eth") via NameWrapper
+ *   2. Set/read text records on the official ENS PublicResolver (ENSIP-5)
  *
- * Contract: ACNRegistry deployed on Arc testnet
- * Pattern:  ENS subname registrar + built-in text resolver
- * Docs:     https://docs.ens.domains/wrapper/creating-subname-registrar
+ * Architecture:
+ *   - ACNSubnameRegistrar calls NameWrapper.setSubnodeRecord() to create subnames
+ *   - Registrar owns the subname in NameWrapper so it can set resolver records
+ *   - Text records are stored on the ENS PublicResolver and are globally readable
+ *   - Anyone can resolve "summariser.acn.eth" via standard ENS resolution
+ *
+ * Docs:
+ *   https://docs.ens.domains/wrapper/creating-subname-registrar
+ *   https://docs.ens.domains/web/records#text-records
+ *   https://docs.ens.domains/resolvers/interacting
  */
 import { ethers } from 'ethers';
 
-// ── Constants ──
+// ── Sepolia Constants ──
 
-const ARC_TESTNET_RPC = 'https://rpc.testnet.arc.network';
-const ARC_CHAIN_ID = 5042002;
-const EXPLORER_BASE = 'https://testnet.arcscan.app';
+const SEPOLIA_RPC = 'https://ethereum-sepolia-rpc.publicnode.com';
+const SEPOLIA_CHAIN_ID = 11155111;
+const EXPLORER_BASE = 'https://sepolia.etherscan.io';
 
-// Deployed ACNRegistry contract address
-const REGISTRY_CONTRACT_ADDRESS = '0x1bdc65986cF1A1721502d4e41E4bAEF0810689B6';
+// Deployed ACNSubnameRegistrar on Sepolia
+const REGISTRAR_ADDRESS = '0x849e65D6A7E6cE7E3f398a81e568b38345a3c00f';
 
-// ABI — mirrors the ACNRegistry contract interface
-const REGISTRY_ABI = [
+// Official ENS PublicResolver on Sepolia
+// https://docs.ens.domains/learn/deployments
+const PUBLIC_RESOLVER_ADDRESS = '0xE99638b40E4Fff0129D56f03b55b6bbC4BBE49b5';
+
+// ABIs
+const REGISTRAR_ABI = [
   // Registration
-  'function registerSubname(string calldata label, address agent) external returns (bytes32 node)',
-  'function isRegistered(string calldata label) external view returns (bool)',
-  'function ownerOf(string calldata label) external view returns (address)',
-  'function fullName(bytes32 node) external view returns (string)',
+  'function register(string calldata label, address agentWallet, string[] calldata keys, string[] calldata values) external returns (bytes32 node)',
+  'function isRegistered(bytes32 node) external view returns (bool)',
+  'function getAgent(bytes32 node) external view returns (address)',
+  'function nodeToLabel(bytes32 node) external view returns (string)',
   'function totalRegistered() external view returns (uint256)',
+  'function owner() external view returns (address)',
+  'function parentNode() external view returns (bytes32)',
 
-  // Text records (ENSIP-5 resolver interface)
+  // Text records (proxied to PublicResolver)
   'function setText(bytes32 node, string calldata key, string calldata value) external',
   'function setTexts(bytes32 node, string[] calldata keys, string[] calldata values) external',
   'function text(bytes32 node, string calldata key) external view returns (string)',
 
-  // Helpers
-  'function namehash(string calldata label) external pure returns (bytes32)',
-  'function labelHash(string calldata label) external pure returns (bytes32)',
-  'function rootDomain() external view returns (string)',
-  'function owner() external view returns (address)',
-
   // Events
-  'event SubnameRegistered(bytes32 indexed node, string label, address indexed owner)',
-  'event TextChanged(bytes32 indexed node, string indexed indexedKey, string key, string value)',
+  'event SubnameRegistered(bytes32 indexed node, string label, address indexed agentWallet)',
+  'event TextRecordSet(bytes32 indexed node, string key, string value)',
 ];
 
-// Standard ACN text record keys (following ENS custom record conventions)
+const RESOLVER_ABI = [
+  'function text(bytes32 node, string calldata key) view returns (string)',
+  'function addr(bytes32 node) view returns (address)',
+];
+
+// Standard ACN text record keys (following ENS custom record conventions / ENSIP-5)
 export const ACN_RECORD_KEYS = {
   REPUTATION:       'acn.reputation',
   ROLE:             'acn.role',
@@ -70,6 +82,7 @@ export interface SubnameInfo {
   fullName: string;
   owner: string;
   node: string;
+  addr: string;
   textRecords: Record<string, string>;
 }
 
@@ -78,46 +91,56 @@ export interface SubnameInfo {
 export class ENSRegistryService {
   private provider: ethers.JsonRpcProvider;
   private wallet: ethers.Wallet;
-  private contract: ethers.Contract;
+  private registrar: ethers.Contract;
+  private resolver: ethers.Contract;
 
   constructor(privateKey: string) {
-    this.provider = new ethers.JsonRpcProvider(ARC_TESTNET_RPC, {
-      chainId: ARC_CHAIN_ID,
-      name: 'arc-testnet',
+    this.provider = new ethers.JsonRpcProvider(SEPOLIA_RPC, {
+      chainId: SEPOLIA_CHAIN_ID,
+      name: 'sepolia',
     });
     this.wallet = new ethers.Wallet(privateKey, this.provider);
-    this.contract = new ethers.Contract(REGISTRY_CONTRACT_ADDRESS, REGISTRY_ABI, this.wallet);
+    this.registrar = new ethers.Contract(REGISTRAR_ADDRESS, REGISTRAR_ABI, this.wallet);
+    this.resolver = new ethers.Contract(PUBLIC_RESOLVER_ADDRESS, RESOLVER_ABI, this.provider);
 
-    console.log(`[ENS] ✅ ENS registry service initialized`);
-    console.log(`[ENS]    Contract: ${REGISTRY_CONTRACT_ADDRESS}`);
-    console.log(`[ENS]    Wallet:   ${this.wallet.address}`);
-    console.log(`[ENS]    Explorer: ${EXPLORER_BASE}/address/${REGISTRY_CONTRACT_ADDRESS}`);
+    console.log(`[ENS] ✅ ENS subname service initialized (Sepolia)`);
+    console.log(`[ENS]    Registrar:  ${REGISTRAR_ADDRESS}`);
+    console.log(`[ENS]    Resolver:   ${PUBLIC_RESOLVER_ADDRESS}`);
+    console.log(`[ENS]    Wallet:     ${this.wallet.address}`);
+    console.log(`[ENS]    Chain:      Sepolia (${SEPOLIA_CHAIN_ID})`);
+    console.log(`[ENS]    Explorer:   ${EXPLORER_BASE}/address/${REGISTRAR_ADDRESS}`);
   }
 
   /**
    * Extract label from an ENS name like "summariser.acn.eth" → "summariser"
    */
   private extractLabel(ensName: string): string {
-    // "summariser.acn.eth" → "summariser"
     const parts = ensName.split('.');
     if (parts.length >= 3 && parts[parts.length - 2] === 'acn' && parts[parts.length - 1] === 'eth') {
       return parts.slice(0, -2).join('.');
     }
-    // If it's just a plain label, return as-is
     return ensName;
   }
 
   /**
-   * Register a subname on-chain.
+   * Compute the ENS namehash for label.acn.eth using ethers.namehash.
+   */
+  private computeNode(label: string): string {
+    return ethers.namehash(`${label}.acn.eth`);
+  }
+
+  /**
+   * Register a subname on-chain via NameWrapper.
    *
-   * Follows the ENS subname registrar pattern:
-   *   NameWrapper.setSubnodeOwner(parentNode, label, owner, fuses, expiry)
-   * simplified for our self-contained registry.
+   * Calls ACNSubnameRegistrar.register() which:
+   *   1. Calls NameWrapper.setSubnodeRecord(parentNode, label, registrar, resolver, 0, 0, max)
+   *   2. Sets text records on the ENS PublicResolver
+   *   3. Sets addr record to the agent's wallet
    *
-   * @param ensName - Full ENS name (e.g. "summariser.acn.eth") or label
-   * @param agentAddress - The agent's wallet address
-   * @param initialRecords - Optional text records to set immediately
-   * @returns Transaction result + node hash
+   * @param ensName        Full ENS name (e.g. "summariser.acn.eth") or label
+   * @param agentAddress   The agent's wallet address
+   * @param initialRecords Optional text records to set immediately
+   * @returns Transaction result + namehash node
    */
   async registerSubname(
     ensName: string,
@@ -125,12 +148,12 @@ export class ENSRegistryService {
     initialRecords?: Record<string, string>,
   ): Promise<RegistryTxResult & { node: string }> {
     const label = this.extractLabel(ensName);
+    const node = this.computeNode(label);
 
     // Check if already registered
-    const alreadyRegistered = await this.contract.isRegistered(label);
+    const alreadyRegistered = await this.registrar.isRegistered(node);
     if (alreadyRegistered) {
-      console.log(`[ENS] ℹ️  "${label}.acn.eth" already registered — skipping`);
-      const node = await this.contract.namehash(label);
+      console.log(`[ENS] ℹ️  "${label}.acn.eth" already registered on Sepolia — skipping`);
       return {
         txHash: '0x0',
         blockNumber: 0,
@@ -140,21 +163,17 @@ export class ENSRegistryService {
       };
     }
 
-    console.log(`[ENS] 📝 Registering "${label}.acn.eth" → ${agentAddress}…`);
+    const keys = initialRecords ? Object.keys(initialRecords) : [];
+    const values = initialRecords ? Object.values(initialRecords) : [];
 
-    const tx = await this.contract.registerSubname(label, agentAddress);
+    console.log(`[ENS] 📝 Registering "${label}.acn.eth" → ${agentAddress} on Sepolia…`);
+
+    const tx = await this.registrar.register(label, agentAddress, keys, values);
     console.log(`[ENS]    tx sent: ${tx.hash}`);
-
-    const receipt = await tx.wait();
-    const node = await this.contract.namehash(label);
-
-    console.log(`[ENS] ✅ Registered! Node: ${node}`);
     console.log(`[ENS]    Explorer: ${EXPLORER_BASE}/tx/${tx.hash}`);
 
-    // Set initial text records if provided
-    if (initialRecords && Object.keys(initialRecords).length > 0) {
-      await this.setTextRecords(node, initialRecords);
-    }
+    const receipt = await tx.wait();
+    console.log(`[ENS] ✅ Registered! Block: ${receipt.blockNumber}, Gas: ${receipt.gasUsed}`);
 
     return {
       txHash: tx.hash,
@@ -166,19 +185,16 @@ export class ENSRegistryService {
   }
 
   /**
-   * Set a single text record on a subname's resolver.
-   *
-   * ENS resolver interface:
-   *   function setText(bytes32 node, string key, string value)
+   * Set a single text record on the ENS PublicResolver via our registrar.
    */
   async setTextRecord(
     node: string,
     key: string,
     value: string,
   ): Promise<RegistryTxResult> {
-    console.log(`[ENS] 📝 setText("${key}", "${value}") for ${node.slice(0, 10)}…`);
+    console.log(`[ENS] 📝 setText("${key}", "${value}") on Sepolia…`);
 
-    const tx = await this.contract.setText(node, key, value);
+    const tx = await this.registrar.setText(node, key, value);
     const receipt = await tx.wait();
 
     console.log(`[ENS] ✅ Text record set — ${EXPLORER_BASE}/tx/${tx.hash}`);
@@ -192,8 +208,7 @@ export class ENSRegistryService {
   }
 
   /**
-   * Batch-set multiple text records in one transaction.
-   * Gas-efficient for setting reputation + role + skills together.
+   * Batch-set multiple text records in one Sepolia transaction.
    */
   async setTextRecords(
     node: string,
@@ -202,9 +217,9 @@ export class ENSRegistryService {
     const keys = Object.keys(records);
     const values = Object.values(records);
 
-    console.log(`[ENS] 📝 setTexts(${keys.length} records) for ${node.slice(0, 10)}…`);
+    console.log(`[ENS] 📝 setTexts(${keys.length} records) on Sepolia…`);
 
-    const tx = await this.contract.setTexts(node, keys, values);
+    const tx = await this.registrar.setTexts(node, keys, values);
     const receipt = await tx.wait();
 
     console.log(`[ENS] ✅ ${keys.length} text records set — ${EXPLORER_BASE}/tx/${tx.hash}`);
@@ -218,25 +233,21 @@ export class ENSRegistryService {
   }
 
   /**
-   * Read a text record from a subname's resolver.
-   *
-   * ENS resolver interface:
-   *   function text(bytes32 node, string key) → string
+   * Read a text record from the ENS PublicResolver (no tx needed).
    */
   async getTextRecord(node: string, key: string): Promise<string> {
-    return this.contract.text(node, key);
+    return this.resolver.text(node, key);
   }
 
   /**
-   * Read multiple text records at once.
+   * Read multiple text records at once (parallel calls to PublicResolver).
    */
   async getTextRecords(
     node: string,
     keys: string[],
   ): Promise<Record<string, string>> {
     const results: Record<string, string> = {};
-    // Execute reads in parallel
-    const values = await Promise.all(keys.map((k) => this.contract.text(node, k)));
+    const values = await Promise.all(keys.map((k) => this.resolver.text(node, k)));
     keys.forEach((k, i) => {
       results[k] = values[i];
     });
@@ -244,42 +255,50 @@ export class ENSRegistryService {
   }
 
   /**
-   * Get the node hash for a label.
+   * Get the namehash node for a label.
    */
-  async getNode(ensName: string): Promise<string> {
+  getNode(ensName: string): string {
     const label = this.extractLabel(ensName);
-    return this.contract.namehash(label);
+    return this.computeNode(label);
   }
 
   /**
-   * Check if a subname is registered.
+   * Check if a subname is registered on-chain.
    */
   async isRegistered(ensName: string): Promise<boolean> {
     const label = this.extractLabel(ensName);
-    return this.contract.isRegistered(label);
+    const node = this.computeNode(label);
+    return this.registrar.isRegistered(node);
   }
 
   /**
-   * Get full subname info including text records.
+   * Get full subname info including text records from the ENS PublicResolver.
    */
   async getSubnameInfo(ensName: string): Promise<SubnameInfo | null> {
     const label = this.extractLabel(ensName);
-    const registered = await this.contract.isRegistered(label);
+    const node = this.computeNode(label);
+
+    const registered = await this.registrar.isRegistered(node);
     if (!registered) return null;
 
-    const node = await this.contract.namehash(label);
-    const owner = await this.contract.ownerOf(label);
-    const fullName = await this.contract.fullName(node);
+    const agentAddr = await this.registrar.getAgent(node);
+    const resolvedAddr = await this.resolver.addr(node).catch(() => ethers.ZeroAddress);
 
-    // Fetch all standard ACN text records
+    // Fetch all standard ACN text records from PublicResolver
     const textRecords = await this.getTextRecords(node, Object.values(ACN_RECORD_KEYS));
 
-    return { label, fullName, owner, node, textRecords };
+    return {
+      label,
+      fullName: `${label}.acn.eth`,
+      owner: agentAddr,
+      node,
+      addr: resolvedAddr,
+      textRecords,
+    };
   }
 
   /**
-   * Update reputation text record after task completion/failure.
-   * Called by settlement logic.
+   * Update reputation text records on ENS after task completion/failure.
    */
   async updateReputation(
     ensName: string,
@@ -288,13 +307,13 @@ export class ENSRegistryService {
     tasksFailed: number,
   ): Promise<RegistryTxResult | null> {
     const label = this.extractLabel(ensName);
-    const registered = await this.contract.isRegistered(label);
+    const node = this.computeNode(label);
+
+    const registered = await this.registrar.isRegistered(node);
     if (!registered) {
-      console.warn(`[ENS] ⚠️ Cannot update reputation — "${label}.acn.eth" not registered`);
+      console.warn(`[ENS] ⚠️ Cannot update reputation — "${label}.acn.eth" not registered on Sepolia`);
       return null;
     }
-
-    const node = await this.contract.namehash(label);
 
     return this.setTextRecords(node, {
       [ACN_RECORD_KEYS.REPUTATION]: newReputation.toString(),
@@ -307,7 +326,7 @@ export class ENSRegistryService {
    * Get total number of registered subnames.
    */
   async getTotalRegistered(): Promise<number> {
-    const n = await this.contract.totalRegistered();
+    const n = await this.registrar.totalRegistered();
     return Number(n);
   }
 
@@ -316,10 +335,11 @@ export class ENSRegistryService {
    */
   getStatus() {
     return {
-      contract: REGISTRY_CONTRACT_ADDRESS,
+      registrar: REGISTRAR_ADDRESS,
+      resolver: PUBLIC_RESOLVER_ADDRESS,
       wallet: this.wallet.address,
-      chain: ARC_CHAIN_ID,
-      rpc: ARC_TESTNET_RPC,
+      chain: 'sepolia',
+      chainId: SEPOLIA_CHAIN_ID,
       explorer: EXPLORER_BASE,
     };
   }
@@ -334,14 +354,15 @@ export function getENSRegistryService(): ENSRegistryService | null {
 }
 
 /**
- * Initialize the ENS registry service.
- * Uses the same ARC_PRIVATE_KEY as the escrow (deployer owns the registry too).
+ * Initialize the ENS subname service.
+ * Requires SEPOLIA_PRIVATE_KEY — the key for the acn.eth owner
+ * who deployed and owns the ACNSubnameRegistrar.
  */
 export function initENSRegistryService(): ENSRegistryService | null {
-  const privateKey = process.env.ARC_PRIVATE_KEY;
+  const privateKey = process.env.SEPOLIA_PRIVATE_KEY;
 
   if (!privateKey) {
-    console.warn('[ENS] ⚠️ ARC_PRIVATE_KEY not set — ENS registry disabled');
+    console.warn('[ENS] ⚠️ SEPOLIA_PRIVATE_KEY not set — ENS subname service disabled');
     return null;
   }
 
