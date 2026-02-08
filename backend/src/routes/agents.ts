@@ -19,7 +19,8 @@ agentRouter.get('/:id', async (req, res) => {
   res.json({ ...agent, id: agent._id });
 });
 
-// POST /api/agents — Register a new agent
+// POST /api/agents — Register (or re-register) an agent
+// Idempotent: upserts by ensName so restarts don't create duplicates
 agentRouter.post('/', async (req, res) => {
   const { ensName, walletAddress, role, skills, maxLiability } = req.body;
 
@@ -28,18 +29,25 @@ agentRouter.post('/', async (req, res) => {
     return;
   }
 
-  const agent = await Agent.create({
-    ensName,
-    walletAddress,
-    role,
-    skills: skills ?? [],
-    maxLiability: maxLiability ?? 0,
-    reputation: 50,
-    active: true,
-  });
+  const agent = await Agent.findOneAndUpdate(
+    { ensName },
+    {
+      $set: {
+        walletAddress,
+        role,
+        skills: skills ?? [],
+        maxLiability: maxLiability ?? 0,
+        active: true,
+      },
+      $setOnInsert: {
+        reputation: 50,
+        registeredAt: new Date(),
+      },
+    },
+    { upsert: true, new: true, runValidators: true },
+  ).lean();
 
-  const obj = agent.toObject();
-  res.status(201).json({ ...obj, id: obj._id });
+  res.status(201).json({ ...agent, id: agent._id });
 });
 
 // PATCH /api/agents/:id — Update agent

@@ -14,7 +14,7 @@ export interface IAgent extends Document {
 }
 
 const AgentSchema = new Schema<IAgent>({
-  ensName:        { type: String, required: true, index: true },
+  ensName:        { type: String, required: true, unique: true },
   walletAddress:  { type: String, required: true },
   role:           { type: String, required: true },
   skills:         { type: [String], default: [] },
@@ -41,6 +41,13 @@ export interface ITask extends Document {
     result: any;
     submittedAt: Date;
   }[];
+  // Escrow / settlement
+  escrowAmount: number;
+  escrowStatus: 'none' | 'held' | 'released' | 'refunded';
+  escrowTxHash: string | null;
+  settlementHash: string | null;
+  settlementTxId: string | null;
+  settledAt: Date | null;
 }
 
 const TaskSchema = new Schema<ITask>({
@@ -56,6 +63,13 @@ const TaskSchema = new Schema<ITask>({
     result:      Schema.Types.Mixed,
     submittedAt: { type: Date, default: Date.now },
   }], default: [] },
+  // Escrow / settlement
+  escrowAmount:    { type: Number, default: 0 },
+  escrowStatus:    { type: String, enum: ['none', 'held', 'released', 'refunded'], default: 'none' },
+  escrowTxHash:    { type: String, default: null },
+  settlementHash:  { type: String, default: null },
+  settlementTxId:  { type: String, default: null },
+  settledAt:       { type: Date, default: null },
 });
 
 export const Task = mongoose.model<ITask>('Task', TaskSchema);
@@ -106,6 +120,7 @@ export const Commitment = mongoose.model<ICommitment>('Commitment', CommitmentSc
 
 export interface IJobPosting extends Document {
   taskId: string;
+  creatorAddress: string;
   title: string;
   description: string;
   budget: number;
@@ -116,6 +131,7 @@ export interface IJobPosting extends Document {
 
 const JobPostingSchema = new Schema<IJobPosting>({
   taskId:         { type: String, required: true, index: true },
+  creatorAddress: { type: String, required: true, index: true },
   title:          { type: String, required: true },
   description:    { type: String, default: '' },
   budget:         { type: Number, required: true },
