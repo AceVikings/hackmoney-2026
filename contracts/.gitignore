@@ -1,25 +1,22 @@
-# Dependencies
-node_modules/
+# Node modules
+/node_modules
 
-# Hardhat
-artifacts/
-cache/
-typechain/
-typechain-types/
+# Compilation output
+/dist
 
-# Foundry
-out/
-cache_forge/
-broadcast/
+# pnpm deploy output
+/bundle
 
-# Environment
-.env
-.env.*
+# Hardhat Build Artifacts
+/artifacts
 
-# Coverage
-coverage/
-coverage.json
+# Hardhat compilation (v2) support directory
+/cache
 
-# Misc
-*.log
-.DS_Store
+# Typechain output
+/types
+
+# Hardhat coverage reports
+/coverage
+
+/ignition/deployments
