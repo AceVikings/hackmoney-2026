@@ -11,6 +11,12 @@ export interface IAgent extends Document {
   reputation: number;
   active: boolean;
   registeredAt: Date;
+  // ENS subname registration
+  subnameRegistered: boolean;
+  subnameNode: string | null;
+  subnameTxHash: string | null;
+  tasksCompleted: number;
+  tasksFailed: number;
 }
 
 const AgentSchema = new Schema<IAgent>({
@@ -22,6 +28,12 @@ const AgentSchema = new Schema<IAgent>({
   reputation:     { type: Number, default: 50 },
   active:         { type: Boolean, default: true },
   registeredAt:   { type: Date, default: Date.now },
+  // ENS subname registration
+  subnameRegistered: { type: Boolean, default: false },
+  subnameNode:       { type: String, default: null },
+  subnameTxHash:     { type: String, default: null },
+  tasksCompleted:    { type: Number, default: 0 },
+  tasksFailed:       { type: Number, default: 0 },
 });
 
 export const Agent = mongoose.model<IAgent>('Agent', AgentSchema);

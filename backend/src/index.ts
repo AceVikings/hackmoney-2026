@@ -9,11 +9,14 @@ dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
 import { connectDB } from './db.js';
 import { initNitrolite } from './services/nitrolite.js';
+import { initEscrowService } from './services/escrow.js';
+import { initENSRegistryService } from './services/ens-registry.js';
 import { agentRouter } from './routes/agents.js';
 import { taskRouter } from './routes/tasks.js';
 import { walletRouter } from './routes/wallets.js';
 import { jobBoardRouter } from './routes/jobboard.js';
 import { nitroliteRouter } from './routes/nitrolite.js';
+import { ensRouter } from './routes/ens.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -28,6 +31,7 @@ app.use('/api/tasks', taskRouter);
 app.use('/api/wallets', walletRouter);
 app.use('/api/jobboard', jobBoardRouter);
 app.use('/api/nitrolite', nitroliteRouter);
+app.use('/api/ens', ensRouter);
 
 // Health check
 app.get('/api/health', (_req, res) => {
@@ -37,6 +41,13 @@ app.get('/api/health', (_req, res) => {
 // Connect to MongoDB, init Nitrolite, then start server
 (async () => {
   await connectDB();
+
+  // Init on-chain escrow service (Arc testnet)
+  initEscrowService();
+
+  // Init ENS registry service (Arc testnet — subname registrar)
+  initENSRegistryService();
+
   app.listen(PORT, () => {
     console.log(`[ACN Backend] Running on http://localhost:${PORT}`);
   });

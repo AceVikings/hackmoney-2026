@@ -1,11 +1,8 @@
 import { Router } from 'express';
 import { JobPosting, JobBid, Task, Activity } from '../models.js';
-import { getNitroliteService } from '../services/nitrolite.js';
+import { getEscrowService } from '../services/escrow.js';
 
 export const jobBoardRouter = Router();
-
-// Token asset ID for ytest.usd on ClearNode sandbox
-const ESCROW_ASSET = 'ytest.usd';
 
 // ── GET /api/jobboard — List all job postings with bids ──
 jobBoardRouter.get('/', async (_req, res) => {
@@ -83,47 +80,34 @@ jobBoardRouter.post('/', async (req, res) => {
     status: 'open',
   });
 
-  // Perform Nitrolite escrow transfer — lock funds in state channel
-  const svc = getNitroliteService();
+  // ── On-chain escrow deposit on Arc testnet ──
+  const escrow = getEscrowService();
   let escrowTxHash: string | null = null;
-  if (svc) {
-    // Wait for auth if WS is reconnecting
-    const authed = svc.isAuthenticated || await svc.waitForAuth(8000);
-    if (authed) {
-      try {
-        console.log(`[Escrow] 🔒 Locking ${budget} ${ESCROW_ASSET} for task ${task._id}…`);
-        const escrowResult = await svc.transfer(
-          svc.address as `0x${string}`,
-          ESCROW_ASSET,
-          String(budget),
-        );
-        escrowTxHash = `escrow_${Date.now().toString(36)}_${task._id!.toString().slice(-8)}`;
-        const rawEscrow = JSON.stringify(escrowResult);
-        task.escrowTxHash = escrowTxHash;
-        task.settlementTxId = rawEscrow.slice(0, 200);
-        await task.save();
-        console.log(`[Escrow] ✅ Escrow locked — hash: ${escrowTxHash}`);
-      } catch (err: any) {
-        console.warn('[Escrow] Transfer failed (non-fatal):', err.message);
-        escrowTxHash = `escrow_sim_${Date.now().toString(36)}_${task._id!.toString().slice(-8)}`;
-        task.escrowTxHash = escrowTxHash;
-        await task.save();
-      }
-    } else {
-      escrowTxHash = `escrow_sim_${Date.now().toString(36)}_${task._id!.toString().slice(-8)}`;
+
+  if (escrow) {
+    try {
+      console.log(`[Escrow] 🔒 Depositing ${budget} USDC on-chain for task ${task._id}…`);
+      const txResult = await escrow.deposit(task._id!.toString(), String(budget));
+      escrowTxHash = txResult.txHash;
       task.escrowTxHash = escrowTxHash;
+      task.settlementTxId = txResult.explorerUrl;
+      await task.save();
+      console.log(`[Escrow] ✅ On-chain deposit confirmed — ${txResult.explorerUrl}`);
+    } catch (err: any) {
+      console.error('[Escrow] ❌ On-chain deposit failed:', err.message);
+      // Store error but don't block job creation
+      task.escrowTxHash = `failed: ${err.message?.slice(0, 80)}`;
+      task.escrowStatus = 'none';
       await task.save();
     }
   } else {
-    escrowTxHash = `escrow_sim_${Date.now().toString(36)}_${task._id!.toString().slice(-8)}`;
-    task.escrowTxHash = escrowTxHash;
-    await task.save();
+    console.warn('[Escrow] ⚠️  Escrow service not available — no on-chain deposit');
   }
 
   await Activity.create({
-    agentId: svc?.isAuthenticated ? 'NITROLITE' : 'SYSTEM',
+    agentId: escrow ? 'ARC_ESCROW' : 'SYSTEM',
     taskId: task._id!.toString(),
-    action: `ESCROW_LOCKED — ${budget} ${ESCROW_ASSET} — ${escrowTxHash}`,
+    action: `ESCROW_LOCKED — ${budget} USDC — ${escrowTxHash ?? 'no-deposit'}`,
   });
 
   res.status(201).json({

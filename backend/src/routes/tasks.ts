@@ -1,11 +1,9 @@
 import { Router } from 'express';
-import { Task, Activity } from '../models.js';
-import { getNitroliteService } from '../services/nitrolite.js';
+import { Task, Activity, Agent } from '../models.js';
+import { getEscrowService } from '../services/escrow.js';
+import { getENSRegistryService } from '../services/ens-registry.js';
 
 export const taskRouter = Router();
-
-// Token asset ID for ytest.usd on ClearNode sandbox
-const SETTLEMENT_ASSET = 'ytest.usd';
 
 // GET /api/tasks — List user's own tasks only (scoped to creatorAddress)
 taskRouter.get('/', async (req, res) => {
@@ -144,71 +142,76 @@ taskRouter.post('/:id/work', async (req, res) => {
     action: 'WORK_SUBMITTED',
   });
 
-  // ── Auto-settle payment via Nitrolite ──
-  const svc = getNitroliteService();
+  // ── Auto-settle payment via on-chain escrow release on Arc testnet ──
+  const escrow = getEscrowService();
   let settlementHash: string | null = null;
-  let settlementTxId: string | null = null;
 
-  // Wait for auth if WS is reconnecting
-  const authed = svc ? (svc.isAuthenticated || await svc.waitForAuth(8000)) : false;
-
-  if (authed && svc && task.escrowStatus === 'held') {
+  if (escrow && task.escrowStatus === 'held') {
     try {
-      console.log(`[Settlement] 💸 Settling ${task.escrowAmount} ${SETTLEMENT_ASSET} for task ${task._id}…`);
+      // Release funds to the escrow wallet (owner) — in production this would go to the agent's address
+      const recipient = escrow.address;
+      console.log(`[Settlement] 💸 Releasing ${task.escrowAmount} USDC on-chain for task ${task._id}…`);
 
-      // Transfer escrowed funds to the ACN vault (in production this goes to agent's wallet)
-      // For sandbox: transfer to self to demonstrate the settlement flow
-      const transferResult = await svc.transfer(
-        svc.address as `0x${string}`,
-        SETTLEMENT_ASSET,
-        String(task.escrowAmount),
-      );
-
-      // Extract settlement hash / tx reference from the Nitrolite response
-      const rawResponse = JSON.stringify(transferResult);
-      settlementHash = `ntrl_${Date.now().toString(36)}_${task._id!.toString().slice(-8)}`;
-      settlementTxId = rawResponse.slice(0, 120);
+      const txResult = await escrow.release(task._id!.toString(), recipient);
+      settlementHash = txResult.txHash;
 
       task.escrowStatus = 'released';
       task.settlementHash = settlementHash;
-      task.settlementTxId = settlementTxId;
+      task.settlementTxId = txResult.explorerUrl;
       task.settledAt = new Date();
       task.status = 'completed';
       await task.save();
 
       await Activity.create({
-        agentId: 'NITROLITE',
+        agentId: 'ARC_ESCROW',
         taskId: task._id!.toString(),
-        action: `PAYMENT_SETTLED — ${task.escrowAmount} ${SETTLEMENT_ASSET} — ${settlementHash}`,
+        action: `PAYMENT_SETTLED — ${task.escrowAmount} USDC — ${settlementHash}`,
       });
 
-      console.log(`[Settlement] ✅ Task ${task._id} settled — hash: ${settlementHash}`);
+      console.log(`[Settlement] ✅ On-chain release confirmed — ${txResult.explorerUrl}`);
+
+      // ── Update ENS text records with new reputation data ──
+      const ensRegistry = getENSRegistryService();
+      if (ensRegistry) {
+        try {
+          const agent = await Agent.findById(agentId);
+          if (agent?.ensName) {
+            // Increment tasks completed
+            agent.tasksCompleted = (agent.tasksCompleted ?? 0) + 1;
+            // Boost reputation (capped at 100)
+            agent.reputation = Math.min(100, (agent.reputation ?? 50) + 2);
+            await agent.save();
+
+            // Write updated reputation to ENS text records on-chain
+            const ensTx = await ensRegistry.updateReputation(
+              agent.ensName,
+              agent.reputation,
+              agent.tasksCompleted,
+              agent.tasksFailed ?? 0,
+            );
+            if (ensTx) {
+              console.log(`[Settlement] 📝 ENS reputation updated for ${agent.ensName} — ${ensTx.explorerUrl}`);
+            }
+          }
+        } catch (ensErr: any) {
+          console.warn(`[Settlement] ⚠️  ENS reputation update failed (non-fatal):`, ensErr.message);
+        }
+      }
     } catch (err: any) {
-      console.error('[Settlement] ❌ Auto-settle failed:', err.message);
-      // Mark as review so user can manually handle
+      console.error('[Settlement] ❌ On-chain release failed:', err.message);
       task.status = 'review';
       await task.save();
 
       await Activity.create({
-        agentId: 'NITROLITE',
+        agentId: 'ARC_ESCROW',
         taskId: task._id!.toString(),
         action: `SETTLEMENT_FAILED — ${err.message}`,
       });
     }
-  } else if (!authed) {
-    // Nitrolite offline — simulate settlement for demo
-    settlementHash = `sim_${Date.now().toString(36)}_${task._id!.toString().slice(-8)}`;
-    task.escrowStatus = 'released';
-    task.settlementHash = settlementHash;
-    task.settledAt = new Date();
-    task.status = 'completed';
+  } else if (!escrow) {
+    console.warn('[Settlement] ⚠️  Escrow service not available — settlement skipped');
+    task.status = 'review';
     await task.save();
-
-    await Activity.create({
-      agentId: 'SYSTEM',
-      taskId: task._id!.toString(),
-      action: `PAYMENT_SETTLED_SIM — ${task.escrowAmount} ${SETTLEMENT_ASSET} — ${settlementHash}`,
-    });
   }
 
   res.json({ ...task.toObject(), id: task._id });
@@ -233,17 +236,36 @@ taskRouter.post('/:id/refund', async (req, res) => {
     return;
   }
 
-  task.escrowStatus = 'refunded';
-  task.status = 'reversed';
-  task.settlementHash = `refund_${Date.now().toString(36)}_${task._id!.toString().slice(-8)}`;
-  task.settledAt = new Date();
-  await task.save();
+  // ── On-chain refund via Arc testnet ──
+  const escrow = getEscrowService();
+  if (escrow) {
+    try {
+      console.log(`[Refund] 🔄 Refunding ${task.escrowAmount} USDC on-chain for task ${task._id}…`);
+      const txResult = await escrow.refund(task._id!.toString());
 
-  await Activity.create({
-    agentId: 'SYSTEM',
-    taskId: task._id!.toString(),
-    action: `REFUND_PROCESSED — ${task.escrowAmount} ${SETTLEMENT_ASSET} returned`,
-  });
+      task.escrowStatus = 'refunded';
+      task.status = 'reversed';
+      task.settlementHash = txResult.txHash;
+      task.settlementTxId = txResult.explorerUrl;
+      task.settledAt = new Date();
+      await task.save();
+
+      await Activity.create({
+        agentId: 'ARC_ESCROW',
+        taskId: task._id!.toString(),
+        action: `REFUND_PROCESSED — ${task.escrowAmount} USDC — ${txResult.txHash}`,
+      });
+
+      console.log(`[Refund] ✅ On-chain refund confirmed — ${txResult.explorerUrl}`);
+    } catch (err: any) {
+      console.error('[Refund] ❌ On-chain refund failed:', err.message);
+      res.status(500).json({ error: `On-chain refund failed: ${err.message}` });
+      return;
+    }
+  } else {
+    res.status(503).json({ error: 'Escrow service not available' });
+    return;
+  }
 
   res.json({ ...task.toObject(), id: task._id });
 });
