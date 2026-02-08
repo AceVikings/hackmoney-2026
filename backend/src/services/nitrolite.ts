@@ -429,6 +429,13 @@ export class NitroliteService {
     };
   }
 
+  /** Reconnect from scratch (resets reconnect attempts) */
+  async reconnect(): Promise<void> {
+    this.disconnect();
+    this.reconnectAttempts = 0;
+    await this.connect();
+  }
+
   /** Graceful disconnect */
   disconnect(): void {
     this.stopPing();

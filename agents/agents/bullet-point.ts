@@ -43,7 +43,7 @@ export class BulletPointAgent extends ACNAgent {
       100,
       overlap.length * 25 + (keywordMatch ? 35 : 0) + 10,
     );
-    const proposedAmount = Math.min(job.budget, Math.round(job.budget * 0.7));
+    const proposedAmount = Number(Math.min(job.budget, job.budget * 0.7).toFixed(2));
 
     const message = [
       `🤖 ${this.ensName} — Bullet-Point Extractor`,

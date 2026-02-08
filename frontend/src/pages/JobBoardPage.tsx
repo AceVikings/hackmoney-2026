@@ -1,5 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { useAccount } from 'wagmi';
+import { useAccount, useWriteContract, useSwitchChain, useChainId } from 'wagmi';
+import { waitForTransactionReceipt } from '@wagmi/core';
+import { parseEther } from 'viem';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import {
   Briefcase,
@@ -13,13 +15,22 @@ import {
   Shield,
   Hash,
   ExternalLink,
+  Wallet,
 } from 'lucide-react';
 import Card, { CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import SectionHeading from '../components/ui/SectionHeading';
 import Button from '../components/ui/Button';
+import { config } from '../config/wagmi';
+import {
+  ESCROW_CONTRACT_ADDRESS,
+  ESCROW_ABI,
+  ARC_CHAIN_ID,
+  taskIdToBytes32,
+} from '../config/contracts';
 import {
   fetchJobBoard,
   createJobPosting,
+  confirmEscrow,
   acceptBid,
   type JobPostingWithBids,
   type JobBid,
@@ -89,6 +100,35 @@ function BidCard({
   );
 }
 
+// ── Step Indicator (escrow deposit progress) ─────────
+
+function StepIndicator({
+  done,
+  active,
+  label,
+}: {
+  done: boolean;
+  active: boolean;
+  label: string;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      {done ? (
+        <CheckCircle size={14} className="text-emerald-400 shrink-0" />
+      ) : active ? (
+        <div className="h-3.5 w-3.5 border-2 border-gold rounded-full animate-spin border-t-transparent shrink-0" />
+      ) : (
+        <div className="h-3.5 w-3.5 border border-pewter/30 rounded-full shrink-0" />
+      )}
+      <span
+        className={`text-xs ${done ? 'text-emerald-400' : active ? 'text-cream' : 'text-pewter/40'}`}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
+
 function PostingCard({
   posting,
   address,
@@ -114,6 +154,7 @@ function PostingCard({
 
   const escrowColor: Record<string, string> = {
     none: 'text-pewter',
+    pending_escrow: 'text-yellow-500',
     held: 'text-amber-400',
     released: 'text-emerald-400',
     refunded: 'text-red-400',
@@ -130,7 +171,7 @@ function PostingCard({
                 className={`shrink-0 flex items-center gap-1 px-2 py-0.5 text-[10px] uppercase tracking-wider ${escrowColor[posting.escrowStatus] ?? 'text-pewter'}`}
               >
                 <Shield size={10} />
-                {posting.escrowStatus}
+                {posting.escrowStatus === 'pending_escrow' ? 'awaiting deposit' : posting.escrowStatus}
               </span>
             )}
             <span
@@ -259,8 +300,21 @@ function PostingCard({
 
 // ── Page ─────────────────────────────────────────────
 
+type EscrowStep =
+  | 'idle'
+  | 'creating'
+  | 'switching-chain'
+  | 'awaiting-signature'
+  | 'confirming-tx'
+  | 'confirming-backend'
+  | 'done';
+
 export default function JobBoardPage() {
   const { isConnected, address } = useAccount();
+  const chainId = useChainId();
+  const { switchChainAsync } = useSwitchChain();
+  const { writeContractAsync } = useWriteContract();
+
   const [postings, setPostings] = useState<JobPostingWithBids[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -274,6 +328,8 @@ export default function JobBoardPage() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [escrowStep, setEscrowStep] = useState<EscrowStep>('idle');
+  const [escrowTxHash, setEscrowTxHash] = useState<string | null>(null);
 
   // Poll
   useEffect(() => {
@@ -297,8 +353,12 @@ export default function JobBoardPage() {
     if (!address) return;
     setSubmitting(true);
     setError('');
+    setEscrowStep('creating');
+    setEscrowTxHash(null);
+
     try {
-      await createJobPosting({
+      // Step 1: Create job posting on backend (escrow pending)
+      const job = await createJobPosting({
         title: form.title,
         description: form.description,
         budget: Number(form.budget),
@@ -308,11 +368,51 @@ export default function JobBoardPage() {
           .filter(Boolean),
         creatorAddress: address,
       });
-      setForm({ title: '', description: '', budget: '', requiredSkills: '' });
-      setShowForm(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to post job');
-    } finally {
+
+      // Step 2: Switch to Arc Testnet if needed
+      if (chainId !== ARC_CHAIN_ID) {
+        setEscrowStep('switching-chain');
+        await switchChainAsync({ chainId: ARC_CHAIN_ID });
+      }
+
+      // Step 3: Deposit escrow on-chain via user's wallet
+      setEscrowStep('awaiting-signature');
+      const bytes32TaskId = taskIdToBytes32(job.taskId);
+      const hash = await writeContractAsync({
+        address: ESCROW_CONTRACT_ADDRESS,
+        abi: ESCROW_ABI,
+        functionName: 'deposit',
+        args: [bytes32TaskId],
+        value: parseEther(String(form.budget)),
+        chainId: ARC_CHAIN_ID,
+      });
+      setEscrowTxHash(hash);
+
+      // Step 4: Wait for on-chain confirmation
+      setEscrowStep('confirming-tx');
+      await waitForTransactionReceipt(config, { hash, chainId: ARC_CHAIN_ID });
+
+      // Step 5: Confirm with backend (verifies deposit on-chain)
+      setEscrowStep('confirming-backend');
+      await confirmEscrow(job.id, hash, address);
+
+      // Done!
+      setEscrowStep('done');
+      setTimeout(() => {
+        setForm({ title: '', description: '', budget: '', requiredSkills: '' });
+        setShowForm(false);
+        setEscrowStep('idle');
+        setEscrowTxHash(null);
+        setSubmitting(false);
+      }, 4000);
+    } catch (err: any) {
+      const msg = err?.shortMessage || err?.message || 'Failed to post job';
+      setError(
+        msg.includes('User rejected') || msg.includes('denied')
+          ? 'Transaction rejected — escrow deposit cancelled'
+          : msg,
+      );
+      setEscrowStep('idle');
       setSubmitting(false);
     }
   };
@@ -415,8 +515,64 @@ export default function JobBoardPage() {
                   </div>
                 </div>
                 {error && <p className="text-red-400 text-xs">{error}</p>}
+
+                {/* Escrow deposit progress stepper */}
+                {escrowStep !== 'idle' && (
+                  <div className="space-y-2.5 border border-gold/20 bg-obsidian/80 p-4">
+                    <p className="text-[10px] uppercase tracking-wider text-gold mb-3 flex items-center gap-1.5">
+                      <Wallet size={12} />
+                      Escrow Deposit Progress
+                    </p>
+                    <StepIndicator
+                      done={['switching-chain', 'awaiting-signature', 'confirming-tx', 'confirming-backend', 'done'].includes(escrowStep)}
+                      active={escrowStep === 'creating'}
+                      label="Creating job posting…"
+                    />
+                    <StepIndicator
+                      done={['awaiting-signature', 'confirming-tx', 'confirming-backend', 'done'].includes(escrowStep)}
+                      active={escrowStep === 'switching-chain'}
+                      label="Switching to Arc Testnet…"
+                    />
+                    <StepIndicator
+                      done={['confirming-tx', 'confirming-backend', 'done'].includes(escrowStep)}
+                      active={escrowStep === 'awaiting-signature'}
+                      label={`Deposit ${form.budget || '—'} USDC → ACNEscrow contract`}
+                    />
+                    <StepIndicator
+                      done={['confirming-backend', 'done'].includes(escrowStep)}
+                      active={escrowStep === 'confirming-tx'}
+                      label="Confirming on Arc Testnet…"
+                    />
+                    <StepIndicator
+                      done={escrowStep === 'done'}
+                      active={escrowStep === 'confirming-backend'}
+                      label="Verifying deposit on-chain…"
+                    />
+                    {escrowTxHash && (
+                      <a
+                        href={`https://testnet.arcscan.app/tx/${escrowTxHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1.5 text-xs text-gold hover:text-cream transition-colors pt-2"
+                      >
+                        <ExternalLink size={12} />
+                        View escrow transaction on ArcScan
+                      </a>
+                    )}
+                    {escrowStep === 'done' && (
+                      <p className="text-emerald-400 text-sm font-medium pt-1">
+                        ✓ Escrow deposited — job is now live on the board!
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 <Button type="submit" disabled={submitting}>
-                  {submitting ? 'Posting…' : 'Post to Job Board'}
+                  {submitting
+                    ? escrowStep === 'done'
+                      ? '✓ Posted!'
+                      : 'Processing…'
+                    : `Post Job & Deposit ${form.budget || '0'} USDC Escrow`}
                 </Button>
               </form>
             </CardContent>

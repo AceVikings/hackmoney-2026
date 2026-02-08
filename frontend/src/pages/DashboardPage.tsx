@@ -21,10 +21,12 @@ import {
   fetchActivityFeed,
   fetchNitroliteStatus,
   fetchNitroliteBalances,
+  fetchEscrowSummary,
   requestRefund,
   type Task,
   type Activity,
   type NitroliteStatus,
+  type EscrowSummary,
 } from '../api/client';
 
 function StatusBadge({ status }: { status: string }) {
@@ -52,19 +54,22 @@ export default function DashboardPage() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [nitroStatus, setNitroStatus] = useState<NitroliteStatus | null>(null);
   const [nitroBalance, setNitroBalance] = useState<string | null>(null);
+  const [escrowSummary, setEscrowSummary] = useState<EscrowSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (isConnected && address) {
       const load = async () => {
         try {
-          const [t, a, ns] = await Promise.all([
+          const [t, a, ns, es] = await Promise.all([
             fetchTasks(address),
             fetchActivityFeed(address),
             fetchNitroliteStatus().catch(() => null),
+            fetchEscrowSummary(address).catch(() => null),
           ]);
           setTasks(t);
           setActivities(a);
+          if (es) setEscrowSummary(es);
           if (ns) {
             setNitroStatus(ns);
             // Fetch live balance if authenticated
@@ -245,6 +250,18 @@ export default function DashboardPage() {
                         </div>
                       )}
 
+                      {/* Nitrolite off-chain settlement */}
+                      {task.nitroliteSettlementId && (
+                        <div className="mt-4 flex items-center gap-2 bg-violet-500/5 border border-violet-500/20 px-3 py-2 text-xs">
+                          <Zap size={12} className="text-violet-400 shrink-0" />
+                          <span className="text-[10px] text-pewter uppercase tracking-wider mr-2">Nitrolite</span>
+                          <span className="text-violet-400 font-mono truncate">
+                            ID: {task.nitroliteSettlementId.toString().slice(0, 24)}…
+                          </span>
+                          <span className="text-[10px] text-pewter ml-auto shrink-0">ERC-7824</span>
+                        </div>
+                      )}
+
                       {/* Refund button for held escrow tasks */}
                       {task.escrowStatus === 'held' && (task.status === 'open' || task.status === 'in-progress') && (
                         <div className="mt-3">
@@ -282,48 +299,92 @@ export default function DashboardPage() {
 
           {/* ── Right sidebar ── */}
           <div className="space-y-10">
-            {/* ── Nitrolite Status ── */}
+            {/* ── Escrow & Settlement ── */}
             <div>
               <div className="mb-6">
                 <h3 className="font-[Marcellus] text-lg uppercase tracking-[0.15em] text-cream flex items-center gap-2">
-                  <Zap size={16} className="text-gold" /> Yellow Network
+                  <Shield size={16} className="text-gold" /> Escrow & Settlement
                 </h3>
               </div>
+
+              {/* On-chain escrow deposits */}
+              <Card hover={false} className="mb-4">
+                <CardContent className="space-y-3">
+                  <p className="text-[10px] uppercase tracking-[0.15em] text-gold mb-1">On-Chain Escrow (Arc Testnet)</p>
+                  {escrowSummary ? (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase tracking-wider text-pewter">Deposited</span>
+                        <span className="text-sm text-cream font-mono">{escrowSummary.total.toFixed(2)} USDC</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 pt-2 border-t border-gold/10">
+                        <div className="text-center">
+                          <p className="text-sm font-mono text-amber-400">{escrowSummary.held.toFixed(2)}</p>
+                          <p className="text-[9px] uppercase tracking-wider text-pewter mt-0.5">Held</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-sm font-mono text-emerald-400">{escrowSummary.released.toFixed(2)}</p>
+                          <p className="text-[9px] uppercase tracking-wider text-pewter mt-0.5">Settled</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-sm font-mono text-red-400">{escrowSummary.refunded.toFixed(2)}</p>
+                          <p className="text-[9px] uppercase tracking-wider text-pewter mt-0.5">Refunded</p>
+                        </div>
+                      </div>
+                      {escrowSummary.pending > 0 && (
+                        <div className="flex items-center justify-between pt-2 border-t border-gold/10">
+                          <span className="text-[10px] uppercase tracking-wider text-pewter">Pending Deposit</span>
+                          <span className="text-[10px] text-yellow-400 font-mono">{escrowSummary.pending.toFixed(2)} USDC</span>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between pt-2 border-t border-gold/10">
+                        <span className="text-[10px] uppercase tracking-wider text-pewter">Jobs</span>
+                        <span className="text-[10px] text-cream">{escrowSummary.count} posting{escrowSummary.count !== 1 ? 's' : ''}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-xs text-pewter">No escrow activity yet.</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Nitrolite state channel status */}
               <Card hover={false}>
                 <CardContent className="space-y-3">
+                  <p className="text-[10px] uppercase tracking-[0.15em] text-gold mb-1 flex items-center gap-1.5">
+                    <Zap size={10} /> Yellow Network / Nitrolite
+                  </p>
                   {nitroStatus ? (
                     <>
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] uppercase tracking-wider text-pewter">Status</span>
+                        <span className="text-[10px] uppercase tracking-wider text-pewter">State Channel</span>
                         <span className={`text-[10px] uppercase tracking-wider ${nitroStatus.authenticated ? 'text-emerald-400' : nitroStatus.connected ? 'text-amber-400' : 'text-red-400'}`}>
                           {nitroStatus.authenticated ? '● Connected' : nitroStatus.connected ? '● Connecting' : '● Offline'}
                         </span>
                       </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase tracking-wider text-pewter">Protocol</span>
+                        <span className="text-[10px] text-gold">ERC-7824</span>
+                      </div>
+                      {nitroBalance && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] uppercase tracking-wider text-pewter">Off-Chain Ledger</span>
+                          <span className="text-[10px] text-emerald-400 font-mono">
+                            {(Number(nitroBalance) / 1e6).toFixed(2)} USDC
+                          </span>
+                        </div>
+                      )}
                       {nitroStatus.address && (
                         <div className="flex items-center justify-between">
-                          <span className="text-[10px] uppercase tracking-wider text-pewter">Wallet</span>
-                          <span className="text-[10px] text-cream font-mono">
+                          <span className="text-[10px] uppercase tracking-wider text-pewter">Node</span>
+                          <span className="text-[10px] text-pewter font-mono">
                             {nitroStatus.address.slice(0, 6)}…{nitroStatus.address.slice(-4)}
                           </span>
                         </div>
                       )}
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] uppercase tracking-wider text-pewter">Protocol</span>
-                        <span className="text-[10px] text-gold">Nitrolite / ERC-7824</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] uppercase tracking-wider text-pewter">Environment</span>
-                        <span className="text-[10px] text-pewter">ClearNode Sandbox</span>
-                      </div>
-                      {nitroBalance && (
-                        <div className="flex items-center justify-between pt-2 border-t border-gold/10">
-                          <span className="text-[10px] uppercase tracking-wider text-pewter">Balance</span>
-                          <span className="text-[10px] text-emerald-400 font-mono">{nitroBalance} ytest.usd</span>
-                        </div>
-                      )}
                     </>
                   ) : (
-                    <p className="text-xs text-pewter">Loading Nitrolite status…</p>
+                    <p className="text-xs text-pewter">Loading…</p>
                   )}
                 </CardContent>
               </Card>

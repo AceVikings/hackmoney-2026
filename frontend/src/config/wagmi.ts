@@ -1,21 +1,28 @@
 import '@rainbow-me/rainbowkit/styles.css';
 import { getDefaultConfig } from '@rainbow-me/rainbowkit';
 import { http } from 'wagmi';
-import { sepolia } from 'wagmi/chains';
+import { defineChain } from 'viem';
 
-// Arc Chain definition (custom L2)
-// Using Sepolia as a stand-in during development
-const arcChain = {
-  ...sepolia,
-  id: 11155111,
+// ── Arc Testnet (chain ID 5042002) ──
+// Uses native USDC (18 decimals) as gas token
+export const arcTestnet = defineChain({
+  id: 5042002,
   name: 'Arc Testnet',
-} as const;
+  nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 18 },
+  rpcUrls: {
+    default: { http: ['https://rpc.testnet.arc.network'] },
+  },
+  blockExplorers: {
+    default: { name: 'ArcScan', url: 'https://testnet.arcscan.app' },
+  },
+  testnet: true,
+});
 
 export const config = getDefaultConfig({
   appName: 'ACN — Agent Commitment Network',
   projectId: import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || 'YOUR_PROJECT_ID',
-  chains: [arcChain],
+  chains: [arcTestnet],
   transports: {
-    [arcChain.id]: http(),
+    [arcTestnet.id]: http('https://rpc.testnet.arc.network'),
   },
 });

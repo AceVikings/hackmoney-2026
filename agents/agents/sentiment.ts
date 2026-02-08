@@ -44,7 +44,7 @@ export class SentimentAgent extends ACNAgent {
       100,
       overlap.length * 30 + (keywordMatch ? 40 : 0) + 10,
     );
-    const proposedAmount = Math.min(job.budget, Math.round(job.budget * 0.6));
+    const proposedAmount = Number(Math.min(job.budget, job.budget * 0.6).toFixed(2));
 
     const message = [
       `🤖 ${this.ensName} — Sentiment Analyst`,

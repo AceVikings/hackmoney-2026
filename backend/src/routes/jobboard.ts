@@ -66,7 +66,7 @@ jobBoardRouter.post('/', async (req, res) => {
     creatorAddress,
     assignedAgents: [],
     escrowAmount: budget,
-    escrowStatus: 'held',
+    escrowStatus: 'pending_escrow',
   });
 
   // Create the job posting (includes creatorAddress now)
@@ -80,44 +80,83 @@ jobBoardRouter.post('/', async (req, res) => {
     status: 'open',
   });
 
-  // ── On-chain escrow deposit on Arc testnet ──
-  const escrow = getEscrowService();
-  let escrowTxHash: string | null = null;
-
-  if (escrow) {
-    try {
-      console.log(`[Escrow] 🔒 Depositing ${budget} USDC on-chain for task ${task._id}…`);
-      const txResult = await escrow.deposit(task._id!.toString(), String(budget));
-      escrowTxHash = txResult.txHash;
-      task.escrowTxHash = escrowTxHash;
-      task.settlementTxId = txResult.explorerUrl;
-      await task.save();
-      console.log(`[Escrow] ✅ On-chain deposit confirmed — ${txResult.explorerUrl}`);
-    } catch (err: any) {
-      console.error('[Escrow] ❌ On-chain deposit failed:', err.message);
-      // Store error but don't block job creation
-      task.escrowTxHash = `failed: ${err.message?.slice(0, 80)}`;
-      task.escrowStatus = 'none';
-      await task.save();
-    }
-  } else {
-    console.warn('[Escrow] ⚠️  Escrow service not available — no on-chain deposit');
-  }
-
+  // No backend deposit — user deposits from their wallet via the frontend
   await Activity.create({
-    agentId: escrow ? 'ARC_ESCROW' : 'SYSTEM',
+    agentId: 'SYSTEM',
     taskId: task._id!.toString(),
-    action: `ESCROW_LOCKED — ${budget} USDC — ${escrowTxHash ?? 'no-deposit'}`,
+    action: `JOB_POSTED — ${budget} USDC — awaiting user escrow deposit`,
   });
+
+  console.log(`[JobBoard] 📋 Job posted — awaiting user escrow deposit for task ${task._id}`);
 
   res.status(201).json({
     ...posting.toObject(),
     id: posting._id,
     creatorAddress,
-    escrowStatus: 'held',
+    escrowStatus: 'pending_escrow',
     escrowAmount: budget,
-    escrowTxHash,
+    escrowTxHash: null,
     bids: [],
+  });
+});
+
+// ── POST /api/jobboard/:id/confirm-escrow — User confirms on-chain escrow deposit ──
+jobBoardRouter.post('/:id/confirm-escrow', async (req, res) => {
+  const { txHash, depositorAddress } = req.body;
+
+  if (!txHash || !depositorAddress) {
+    res.status(400).json({ error: 'txHash and depositorAddress are required' });
+    return;
+  }
+
+  const posting = await JobPosting.findById(req.params.id);
+  if (!posting) {
+    res.status(404).json({ error: 'Job posting not found' });
+    return;
+  }
+
+  const task = await Task.findById(posting.taskId);
+  if (!task) {
+    res.status(404).json({ error: 'Linked task not found' });
+    return;
+  }
+
+  // Verify on-chain deposit exists
+  const escrow = getEscrowService();
+  if (escrow) {
+    try {
+      const state = await escrow.getEscrow(task._id!.toString());
+      if (Number(state.amount) <= 0) {
+        res.status(400).json({ error: 'No escrow deposit found on-chain — please wait for confirmation' });
+        return;
+      }
+      console.log(`[Escrow] ✅ Verified on-chain deposit: ${state.amount} USDC from ${state.depositor}`);
+    } catch (err: any) {
+      console.warn(`[Escrow] ⚠️  Could not verify deposit on-chain: ${err.message}`);
+    }
+  }
+
+  task.escrowStatus = 'held';
+  task.escrowTxHash = txHash;
+  await task.save();
+
+  await Activity.create({
+    agentId: depositorAddress,
+    taskId: task._id!.toString(),
+    action: `ESCROW_CONFIRMED — ${task.escrowAmount} USDC — ${txHash}`,
+  });
+
+  console.log(`[Escrow] ✅ User escrow confirmed for task ${task._id} — ${txHash}`);
+
+  const bids = await JobBid.find({ jobId: posting._id!.toString() }).sort({ createdAt: -1 }).lean();
+  res.json({
+    ...posting.toObject(),
+    id: posting._id,
+    creatorAddress: posting.creatorAddress,
+    escrowStatus: 'held',
+    escrowAmount: task.escrowAmount,
+    escrowTxHash: txHash,
+    bids: bids.map((b) => ({ ...b, id: b._id })),
   });
 });
 

@@ -88,11 +88,13 @@ export interface Task {
   hasResults?: boolean;
   // Escrow / settlement
   escrowAmount?: number;
-  escrowStatus?: 'none' | 'held' | 'released' | 'refunded';
+  escrowStatus?: 'none' | 'pending_escrow' | 'held' | 'released' | 'refunded';
   escrowTxHash?: string | null;
   settlementHash?: string | null;
   settlementTxId?: string | null;
   settledAt?: string | null;
+  // Nitrolite off-chain settlement
+  nitroliteSettlementId?: string | null;
 }
 
 export interface Activity {
@@ -191,7 +193,7 @@ export interface JobPostingWithBids {
   postedAt: string;
   status: 'open' | 'assigned' | 'closed';
   creatorAddress: string;
-  escrowStatus?: 'none' | 'held' | 'released' | 'refunded';
+  escrowStatus?: 'none' | 'pending_escrow' | 'held' | 'released' | 'refunded';
   escrowAmount?: number;
   escrowTxHash?: string | null;
   settlementHash?: string | null;
@@ -216,6 +218,13 @@ export function createJobPosting(data: {
   return request<JobPostingWithBids>('/jobboard', {
     method: 'POST',
     body: JSON.stringify(data),
+  });
+}
+
+export function confirmEscrow(jobId: string, txHash: string, depositorAddress: string) {
+  return request<JobPostingWithBids>(`/jobboard/${jobId}/confirm-escrow`, {
+    method: 'POST',
+    body: JSON.stringify({ txHash, depositorAddress }),
   });
 }
 
@@ -244,6 +253,22 @@ export function fetchNitroliteStatus() {
 
 export function fetchNitroliteBalances() {
   return request<any>('/nitrolite/balances');
+}
+
+// ── Escrow summary ───────────────────────────────────
+
+export interface EscrowSummary {
+  held: number;
+  released: number;
+  refunded: number;
+  pending: number;
+  total: number;
+  count: number;
+  tasks: { id: string; title: string; amount: number; status: string; txHash: string | null }[];
+}
+
+export function fetchEscrowSummary(address: string) {
+  return request<EscrowSummary>(`/tasks/escrow-summary?address=${address}`);
 }
 
 export function requestRefund(taskId: string, callerAddress: string) {

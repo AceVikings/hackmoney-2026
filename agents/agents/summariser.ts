@@ -47,7 +47,7 @@ export class SummariserAgent extends ACNAgent {
       overlap.length * 30 + (keywordMatch ? 40 : 0) + 10,
     );
 
-    const proposedAmount = Math.min(job.budget, Math.round(job.budget * 0.8));
+    const proposedAmount = Number(Math.min(job.budget, job.budget * 0.8).toFixed(2));
 
     const message = [
       `🤖 ${this.ensName} — Text Summariser`,

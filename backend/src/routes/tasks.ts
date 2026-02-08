@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { Task, Activity, Agent } from '../models.js';
 import { getEscrowService } from '../services/escrow.js';
 import { getENSRegistryService } from '../services/ens-registry.js';
+import { getNitroliteService } from '../services/nitrolite.js';
 
 export const taskRouter = Router();
 
@@ -19,6 +20,48 @@ taskRouter.get('/', async (req, res) => {
   }).sort({ createdAt: -1 }).lean();
 
   res.json(tasks.map((task) => ({ ...task, id: task._id })));
+});
+
+// GET /api/tasks/escrow-summary — Aggregate escrow stats for a user
+taskRouter.get('/escrow-summary', async (req, res) => {
+  const addr = req.query.address as string;
+  if (!addr) {
+    res.json({ held: 0, released: 0, refunded: 0, pending: 0, total: 0, count: 0 });
+    return;
+  }
+
+  const tasks = await Task.find({
+    creatorAddress: { $regex: new RegExp(`^${addr}$`, 'i') },
+    escrowAmount: { $gt: 0 },
+  }).lean();
+
+  const summary = {
+    held: 0,
+    released: 0,
+    refunded: 0,
+    pending: 0,
+    total: 0,
+    count: tasks.length,
+    tasks: [] as { id: string; title: string; amount: number; status: string; txHash: string | null }[],
+  };
+
+  for (const t of tasks) {
+    const amt = t.escrowAmount ?? 0;
+    summary.total += amt;
+    if (t.escrowStatus === 'held') summary.held += amt;
+    else if (t.escrowStatus === 'released') summary.released += amt;
+    else if (t.escrowStatus === 'refunded') summary.refunded += amt;
+    else if (t.escrowStatus === 'pending_escrow') summary.pending += amt;
+    summary.tasks.push({
+      id: (t._id as any).toString(),
+      title: t.title,
+      amount: amt,
+      status: t.escrowStatus ?? 'none',
+      txHash: t.escrowTxHash ?? null,
+    });
+  }
+
+  res.json(summary);
 });
 
 // GET /api/tasks/activity/feed — Activity feed scoped to user's tasks
@@ -169,6 +212,45 @@ taskRouter.post('/:id/work', async (req, res) => {
       });
 
       console.log(`[Settlement] ✅ On-chain release confirmed — ${txResult.explorerUrl}`);
+
+      // ── Nitrolite off-chain settlement via Yellow Network state channel ──
+      const nitrolite = getNitroliteService();
+      if (nitrolite && nitrolite.isAuthenticated) {
+        try {
+          // Convert USDC amount to micro-units (6 decimals for ytest.usd)
+          const microAmount = String(Math.round((task.escrowAmount ?? 0) * 1e6));
+          console.log(`[Nitrolite] 💸 Settling ${task.escrowAmount} USDC via state channel (${microAmount} ytest.usd)…`);
+
+          const nitroResult = await nitrolite.transfer(
+            recipient as `0x${string}`,
+            'ytest.usd',
+            microAmount,
+          );
+
+          // Extract settlement ID from the Nitrolite RPC response
+          const nitroId = nitroResult?.res?.[0]
+            ?? JSON.stringify(nitroResult).slice(0, 120);
+          task.nitroliteSettlementId = String(nitroId);
+          await task.save();
+
+          await Activity.create({
+            agentId: 'NITROLITE',
+            taskId: task._id!.toString(),
+            action: `NITROLITE_SETTLED — ${task.escrowAmount} USDC — ID: ${String(nitroId).slice(0, 40)}`,
+          });
+
+          console.log(`[Nitrolite] ✅ State channel settlement complete — ID: ${String(nitroId)}`);
+        } catch (nitroErr: any) {
+          console.warn(`[Nitrolite] ⚠️  Off-chain settlement failed (non-fatal): ${nitroErr.message}`);
+          await Activity.create({
+            agentId: 'NITROLITE',
+            taskId: task._id!.toString(),
+            action: `NITROLITE_SETTLEMENT_FAILED — ${nitroErr.message?.slice(0, 80)}`,
+          });
+        }
+      } else {
+        console.log('[Nitrolite] ℹ️  Nitrolite not connected — skipping off-chain settlement');
+      }
 
       // ── Update ENS text records with new reputation data ──
       const ensRegistry = getENSRegistryService();

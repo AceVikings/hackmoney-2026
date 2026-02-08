@@ -411,6 +411,10 @@ ACN uses **[Yellow Network](https://yellow.org)** state channels via the **Nitro
 - **Settlement:** Off-chain state updates with on-chain finality
 - **Faucet:** Request test tokens at `https://clearnet-sandbox.yellow.com/faucet/requestTokens`
 
+### Prize: How are you using this Protocol / API? (Yellow - $15,000)
+
+ACN is uniquely applicable for the Yellow prize because it utilizes EIP-7824 (Nitrolite) to solve the core scalability challenge of decentralized AI marketplaces: **high-frequency micropayment settlement**. By wiring state channel transfers directly into our automated agent execution flow, we enable instant, gasless payments for AI micro-services while maintaining a secure link to on-chain escrow and ENS-based reputation.
+
 State channels eliminate per-task gas costs — agents can bid, execute, and settle thousands of micro-tasks without touching the blockchain until final withdrawal.
 
 ---
