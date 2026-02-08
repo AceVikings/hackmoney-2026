@@ -214,20 +214,26 @@ taskRouter.post('/:id/work', async (req, res) => {
       console.log(`[Settlement] ✅ On-chain release confirmed — ${txResult.explorerUrl}`);
 
       // ── Nitrolite off-chain settlement via Yellow Network state channel ──
+      // The state channel manages the split: agent receives bid amount,
+      // remainder is credited back to the creator.
       const nitrolite = getNitroliteService();
       if (nitrolite && nitrolite.isAuthenticated) {
+        const bidAmount = task.acceptedBidAmount ?? task.escrowAmount ?? 0;
+        const refundDue = Number(((task.escrowAmount ?? 0) - bidAmount).toFixed(6));
+
+        // ── 1. Pay agent the accepted bid amount ──
         try {
-          // Convert USDC amount to micro-units (6 decimals for ytest.usd)
-          const microAmount = String(Math.round((task.escrowAmount ?? 0) * 1e6));
-          console.log(`[Nitrolite] 💸 Settling ${task.escrowAmount} USDC via state channel (${microAmount} ytest.usd)…`);
+          const agentMicro = String(Math.round(bidAmount * 1e6));
+          const agent = await Agent.findById(agentId);
+          const agentAddr = (agent?.walletAddress ?? recipient) as `0x${string}`;
+          console.log(`[Nitrolite] 💸 Paying agent ${bidAmount} USDC (${agentMicro} µ ytest.usd) → ${agentAddr}`);
 
           const nitroResult = await nitrolite.transfer(
-            recipient as `0x${string}`,
+            agentAddr,
             'ytest.usd',
-            microAmount,
+            agentMicro,
           );
 
-          // Extract settlement ID from the Nitrolite RPC response
           const nitroId = nitroResult?.res?.[0]
             ?? JSON.stringify(nitroResult).slice(0, 120);
           task.nitroliteSettlementId = String(nitroId);
@@ -236,17 +242,55 @@ taskRouter.post('/:id/work', async (req, res) => {
           await Activity.create({
             agentId: 'NITROLITE',
             taskId: task._id!.toString(),
-            action: `NITROLITE_SETTLED — ${task.escrowAmount} USDC — ID: ${String(nitroId).slice(0, 40)}`,
+            action: `NITROLITE_AGENT_PAID — ${bidAmount} USDC — ID: ${String(nitroId).slice(0, 40)}`,
           });
 
-          console.log(`[Nitrolite] ✅ State channel settlement complete — ID: ${String(nitroId)}`);
+          console.log(`[Nitrolite] ✅ Agent payment settled — ${bidAmount} USDC — ID: ${String(nitroId)}`);
         } catch (nitroErr: any) {
-          console.warn(`[Nitrolite] ⚠️  Off-chain settlement failed (non-fatal): ${nitroErr.message}`);
+          console.warn(`[Nitrolite] ⚠️  Agent payment failed (non-fatal): ${nitroErr.message}`);
           await Activity.create({
             agentId: 'NITROLITE',
             taskId: task._id!.toString(),
-            action: `NITROLITE_SETTLEMENT_FAILED — ${nitroErr.message?.slice(0, 80)}`,
+            action: `NITROLITE_AGENT_PAYMENT_FAILED — ${nitroErr.message?.slice(0, 80)}`,
           });
+        }
+
+        // ── 2. Refund remainder to creator ──
+        if (refundDue > 0) {
+          try {
+            const refundMicro = String(Math.round(refundDue * 1e6));
+            const creatorAddr = task.creatorAddress as `0x${string}`;
+            console.log(`[Nitrolite] 🔄 Refunding ${refundDue} USDC (${refundMicro} µ ytest.usd) → creator ${creatorAddr}`);
+
+            const refundResult = await nitrolite.transfer(
+              creatorAddr,
+              'ytest.usd',
+              refundMicro,
+            );
+
+            const refundId = refundResult?.res?.[0]
+              ?? JSON.stringify(refundResult).slice(0, 120);
+            task.nitroliteRefundId = String(refundId);
+            task.refundAmount = refundDue;
+            await task.save();
+
+            await Activity.create({
+              agentId: 'NITROLITE',
+              taskId: task._id!.toString(),
+              action: `NITROLITE_CREATOR_REFUND — ${refundDue} USDC — ID: ${String(refundId).slice(0, 40)}`,
+            });
+
+            console.log(`[Nitrolite] ✅ Creator refund settled — ${refundDue} USDC — ID: ${String(refundId)}`);
+          } catch (refundErr: any) {
+            console.warn(`[Nitrolite] ⚠️  Creator refund failed (non-fatal): ${refundErr.message}`);
+            await Activity.create({
+              agentId: 'NITROLITE',
+              taskId: task._id!.toString(),
+              action: `NITROLITE_REFUND_FAILED — ${refundErr.message?.slice(0, 80)}`,
+            });
+          }
+        } else {
+          console.log(`[Nitrolite] ℹ️  No refund needed — bid equals escrow amount`);
         }
       } else {
         console.log('[Nitrolite] ℹ️  Nitrolite not connected — skipping off-chain settlement');

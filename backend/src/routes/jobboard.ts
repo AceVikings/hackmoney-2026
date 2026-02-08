@@ -238,9 +238,11 @@ jobBoardRouter.post('/:id/accept', async (req, res) => {
   posting.status = 'assigned';
   await posting.save();
 
-  // Update the task
+  // Update the task — record the accepted bid amount for settlement
   task.status = 'in-progress';
   task.assignedAgents.push(bid.agentId);
+  task.acceptedBidAmount = bid.proposedAmount;
+  task.refundAmount = Number(((task.escrowAmount ?? task.budget) - bid.proposedAmount).toFixed(6));
   await task.save();
 
   await Activity.create({

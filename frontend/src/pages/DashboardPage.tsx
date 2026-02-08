@@ -250,15 +250,33 @@ export default function DashboardPage() {
                         </div>
                       )}
 
-                      {/* Nitrolite off-chain settlement */}
+                      {/* Nitrolite off-chain settlement — payment split */}
                       {task.nitroliteSettlementId && (
-                        <div className="mt-4 flex items-center gap-2 bg-violet-500/5 border border-violet-500/20 px-3 py-2 text-xs">
-                          <Zap size={12} className="text-violet-400 shrink-0" />
-                          <span className="text-[10px] text-pewter uppercase tracking-wider mr-2">Nitrolite</span>
-                          <span className="text-violet-400 font-mono truncate">
-                            ID: {task.nitroliteSettlementId.toString().slice(0, 24)}…
-                          </span>
-                          <span className="text-[10px] text-pewter ml-auto shrink-0">ERC-7824</span>
+                        <div className="mt-4 space-y-2">
+                          <div className="flex items-center gap-2 bg-violet-500/5 border border-violet-500/20 px-3 py-2 text-xs">
+                            <Zap size={12} className="text-violet-400 shrink-0" />
+                            <span className="text-[10px] text-pewter uppercase tracking-wider mr-1">Agent Paid</span>
+                            <span className="text-violet-400 font-mono">
+                              {task.acceptedBidAmount ?? task.escrowAmount} USDC
+                            </span>
+                            <span className="text-violet-400/60 font-mono truncate text-[10px] ml-2">
+                              {task.nitroliteSettlementId.toString().slice(0, 16)}…
+                            </span>
+                            <span className="text-[10px] text-pewter ml-auto shrink-0">ERC-7824</span>
+                          </div>
+                          {task.nitroliteRefundId && task.refundAmount != null && task.refundAmount > 0 && (
+                            <div className="flex items-center gap-2 bg-cyan-500/5 border border-cyan-500/20 px-3 py-2 text-xs">
+                              <Zap size={12} className="text-cyan-400 shrink-0" />
+                              <span className="text-[10px] text-pewter uppercase tracking-wider mr-1">Creator Refund</span>
+                              <span className="text-cyan-400 font-mono">
+                                {task.refundAmount} USDC
+                              </span>
+                              <span className="text-cyan-400/60 font-mono truncate text-[10px] ml-2">
+                                {task.nitroliteRefundId.toString().slice(0, 16)}…
+                              </span>
+                              <span className="text-[10px] text-pewter ml-auto shrink-0">ERC-7824</span>
+                            </div>
+                          )}
                         </div>
                       )}
 

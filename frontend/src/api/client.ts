@@ -88,6 +88,8 @@ export interface Task {
   hasResults?: boolean;
   // Escrow / settlement
   escrowAmount?: number;
+  acceptedBidAmount?: number | null;
+  refundAmount?: number | null;
   escrowStatus?: 'none' | 'pending_escrow' | 'held' | 'released' | 'refunded';
   escrowTxHash?: string | null;
   settlementHash?: string | null;
@@ -95,6 +97,7 @@ export interface Task {
   settledAt?: string | null;
   // Nitrolite off-chain settlement
   nitroliteSettlementId?: string | null;
+  nitroliteRefundId?: string | null;
 }
 
 export interface Activity {

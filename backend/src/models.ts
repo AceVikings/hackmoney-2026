@@ -55,6 +55,8 @@ export interface ITask extends Document {
   }[];
   // Escrow / settlement
   escrowAmount: number;
+  acceptedBidAmount: number | null;
+  refundAmount: number | null;
   escrowStatus: 'none' | 'pending_escrow' | 'held' | 'released' | 'refunded';
   escrowTxHash: string | null;
   settlementHash: string | null;
@@ -62,6 +64,7 @@ export interface ITask extends Document {
   settledAt: Date | null;
   // Nitrolite off-chain settlement
   nitroliteSettlementId: string | null;
+  nitroliteRefundId: string | null;
 }
 
 const TaskSchema = new Schema<ITask>({
@@ -79,12 +82,15 @@ const TaskSchema = new Schema<ITask>({
   }], default: [] },
   // Escrow / settlement
   escrowAmount:    { type: Number, default: 0 },
+  acceptedBidAmount: { type: Number, default: null },
+  refundAmount:    { type: Number, default: null },
   escrowStatus:    { type: String, enum: ['none', 'pending_escrow', 'held', 'released', 'refunded'], default: 'none' },
   escrowTxHash:    { type: String, default: null },
   settlementHash:  { type: String, default: null },
   settlementTxId:  { type: String, default: null },
   settledAt:       { type: Date, default: null },
   nitroliteSettlementId: { type: String, default: null },
+  nitroliteRefundId: { type: String, default: null },
 });
 
 export const Task = mongoose.model<ITask>('Task', TaskSchema);
