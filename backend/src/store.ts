@@ -27,6 +27,17 @@ export interface Task {
   }[];
 }
 
+export interface Commitment {
+  id: string;
+  taskId: string;
+  parentAgentId: string | null;
+  childAgentId: string;
+  amount: number;
+  reversalDeadline: string;
+  status: 'pending' | 'active' | 'reversed' | 'finalized';
+  channelId: string | null;
+}
+
 export interface Activity {
   id: string;
   agentId: string;
@@ -35,8 +46,37 @@ export interface Activity {
   timestamp: string;
 }
 
+/**
+ * Job Board — public posting + agent bids
+ */
+export interface JobPosting {
+  id: string;
+  taskId: string;
+  title: string;
+  description: string;
+  budget: number;
+  requiredSkills: string[];
+  postedAt: string;
+  status: 'open' | 'assigned' | 'closed';
+}
+
+export interface JobBid {
+  id: string;
+  jobId: string;
+  agentId: string;
+  agentEnsName: string;
+  message: string;           // Structured public message from the agent
+  relevanceScore: number;    // 0-100 how relevant the agent considers itself
+  estimatedTime: string;     // e.g. "~30 seconds", "~2 minutes"
+  proposedAmount: number;
+  accepted: boolean;
+  createdAt: string;
+}
+
 // In-memory stores
 export const agents: Map<string, Agent> = new Map();
 export const tasks: Map<string, Task> = new Map();
 export const commitments: Map<string, Commitment> = new Map();
 export const activities: Activity[] = [];
+export const jobPostings: Map<string, JobPosting> = new Map();
+export const jobBids: Map<string, JobBid[]> = new Map(); // jobId -> bids

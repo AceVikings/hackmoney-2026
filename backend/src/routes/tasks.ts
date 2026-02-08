@@ -16,6 +16,11 @@ taskRouter.get('/', (req, res) => {
   res.json(taskList);
 });
 
+// GET /api/tasks/activity — Get public activity feed
+taskRouter.get('/activity/feed', (_req, res) => {
+  res.json(activities.slice(-20).reverse());
+});
+
 // GET /api/tasks/:id — Get single task
 taskRouter.get('/:id', (req, res) => {
   const task = tasks.get(req.params.id);
@@ -35,67 +40,6 @@ taskRouter.get('/:id', (req, res) => {
   }
 });
 
-// POST /api/tasks — Create a new task
-taskRouter.post('/', (req, res) => {
-  const { title, description, budget, creatorAddress } = req.body;
-
-  if (!title || !budget || !creatorAddress) {
-    res.status(400).json({ error: 'title, budget, and creatorAddress are required' });
-    return;
-  }
-
-  const id = uuid();
-  const task: Task = {
-    id,
-    title,
-    description: description ?? '',
-    budget,
-    status: 'open',
-    creatorAddress,
-    assignedAgents: [],
-    createdAt: new Date().toISOString(),
-  };
-
-  tasks.set(id, task);
-  res.status(201).json(task);
-});
-
-// POST /api/tasks/:id/work — Submit work proof
-taskRouter.post('/:id/work', (req, res) => {
-  const task = tasks.get(req.params.id);
-  if (!task) {
-    res.status(404).json({ error: 'Task not found' });
-    return;
-  }
-
-  const { agentId, result } = req.body;
-  
-  if (!task.workResults) task.workResults = [];
-  task.workResults.push({
-    agentId,
-    result,
-    submittedAt: new Date().toISOString()
-  });
-
-  task.status = 'review';
-  
-  // Log activity
-  activities.push({
-    id: uuid(),
-    agentId,
-    taskId: task.id,
-    action: 'SUBMITTED_WORK',
-    timestamp: new Date().toISOString()
-  });
-
-  tasks.set(task.id, task);
-  res.json({ success: true });
-});
-
-// GET /api/tasks/activity — Get public activity feed
-taskRouter.get('/activity/feed', (_req, res) => {
-  res.json(activities.slice(-20).reverse());
-});
 
 // PATCH /api/tasks/:id/status — Update task status
 taskRouter.patch('/:id/status', (req, res) => {
@@ -105,7 +49,7 @@ taskRouter.patch('/:id/status', (req, res) => {
     return;
   }
 
-  const { status } = req.body;
+  const { status, agentId } = req.body;
   const validStatuses = ['open', 'in-progress', 'review', 'settlement', 'completed', 'reversed'];
   if (!validStatuses.includes(status)) {
     res.status(400).json({ error: `status must be one of: ${validStatuses.join(', ')}` });
@@ -113,6 +57,16 @@ taskRouter.patch('/:id/status', (req, res) => {
   }
 
   task.status = status;
+  
+  // Log activity
+  activities.push({
+    id: uuid(),
+    agentId: agentId ?? 'SYSTEM',
+    taskId: task.id,
+    action: `STATUS_CHANGED_TO_${status.toUpperCase()}`,
+    timestamp: new Date().toISOString()
+  });
+
   tasks.set(task.id, task);
   res.json(task);
 });
