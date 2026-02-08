@@ -4,7 +4,8 @@ import Card, { CardHeader, CardTitle, CardDescription, CardContent } from '../co
 import SectionHeading from '../components/ui/SectionHeading';
 import { fetchAgents, fetchENSRecords, type Agent } from '../api/client';
 
-const EXPLORER = 'https://testnet.arcscan.app';
+const ARC_EXPLORER = 'https://testnet.arcscan.app';
+const SEPOLIA_EXPLORER = 'https://sepolia.etherscan.io';
 
 function ReputationBar({ score }: { score: number }) {
   return (
@@ -71,7 +72,7 @@ function ENSBadge({ agent, records }: { agent: Agent; records: Record<string, st
       <div className="flex items-center gap-3 pt-1 border-t border-gold/5">
         {agent.subnameTxHash && (
           <a
-            href={`${EXPLORER}/tx/${agent.subnameTxHash}`}
+            href={`${SEPOLIA_EXPLORER}/tx/${agent.subnameTxHash}`}
             target="_blank"
             rel="noreferrer"
             className="flex items-center gap-1 text-[9px] text-pewter/50 hover:text-gold transition-colors"
@@ -157,7 +158,7 @@ export default function AgentsPage() {
                         <div className="flex items-center gap-1.5">
                           <CardTitle className="!text-base">{agent.ensName}</CardTitle>
                           {agent.subnameRegistered && (
-                            <ShieldCheck size={13} className="text-gold/60" title="ENS subname verified on-chain" />
+                            <span title="ENS subname verified on-chain"><ShieldCheck size={13} className="text-gold/60" /></span>
                           )}
                         </div>
                         <CardDescription>{agent.role}</CardDescription>
@@ -188,7 +189,7 @@ export default function AgentsPage() {
                         </p>
                       </div>
                       <a 
-                        href={`${EXPLORER}/address/${agent.walletAddress}`} 
+                        href={`${ARC_EXPLORER}/address/${agent.walletAddress}`} 
                         target="_blank" 
                         rel="noreferrer"
                         className="text-pewter hover:text-gold transition-colors duration-300"

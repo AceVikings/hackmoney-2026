@@ -172,7 +172,7 @@ export default function LandingPage() {
                 title: 'Settlement on Arc',
                 desc: 'Net balances settle on-chain. Reputation is recorded via EIP-8004. No human intervention.',
               },
-            ].map((item, i) => (
+            ].map((item) => (
               <div key={item.step} className="relative pl-16 pb-12 last:pb-0">
                 {/* Step marker */}
                 <div className="absolute left-3 top-0 h-7 w-7 rotate-45 border border-gold/50 bg-obsidian flex items-center justify-center">
