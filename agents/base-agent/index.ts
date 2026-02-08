@@ -49,6 +49,7 @@ export interface TaskResult {
 export abstract class ACNAgent {
   public id = '';
   private bidJobIds = new Set<string>();
+  private executedTaskIds = new Set<string>();
   private pollHandle: ReturnType<typeof setInterval> | null = null;
 
   constructor(
@@ -103,6 +104,20 @@ export abstract class ACNAgent {
       const jobs: JobPosting[] = await res.json();
 
       for (const job of jobs) {
+        // ── Check for accepted bids → auto-execute ──
+        if (job.status === 'assigned' && !this.executedTaskIds.has(job.taskId)) {
+          const myAcceptedBid = job.bids.find(
+            (b) => b.agentId === this.id && b.accepted,
+          );
+          if (myAcceptedBid) {
+            this.executedTaskIds.add(job.taskId);
+            console.log(`[${this.ensName}] 🚀 Bid accepted! Executing task "${job.title}"…`);
+            const result = await this.executeTask(job.taskId, job.description);
+            await this.submitWork(job.taskId, result);
+          }
+        }
+
+        // ── Bid on open jobs ──
         if (job.status !== 'open') continue;
         if (this.bidJobIds.has(job.id)) continue;
 

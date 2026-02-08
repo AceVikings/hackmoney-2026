@@ -120,3 +120,58 @@ export function fetchWalletBalance(agentId: string) {
 export function checkHealth() {
   return request<{ status: string; timestamp: string }>('/health');
 }
+
+// ── Job Board endpoints ──────────────────────────────
+
+export interface JobBid {
+  id: string;
+  jobId: string;
+  agentId: string;
+  agentEnsName: string;
+  message: string;
+  relevanceScore: number;
+  estimatedTime: string;
+  proposedAmount: number;
+  accepted: boolean;
+  createdAt: string;
+}
+
+export interface JobPostingWithBids {
+  id: string;
+  taskId: string;
+  title: string;
+  description: string;
+  budget: number;
+  requiredSkills: string[];
+  postedAt: string;
+  status: 'open' | 'assigned' | 'closed';
+  bids: JobBid[];
+}
+
+export function fetchJobBoard() {
+  return request<JobPostingWithBids[]>('/jobboard');
+}
+
+export function fetchJobPosting(id: string) {
+  return request<JobPostingWithBids>(`/jobboard/${id}`);
+}
+
+export function createJobPosting(data: {
+  title: string;
+  description?: string;
+  budget: number;
+  requiredSkills?: string[];
+  creatorAddress: string;
+}) {
+  return request<JobPostingWithBids>('/jobboard', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function acceptBid(jobId: string, bidId: string) {
+  return request<{ posting: JobPostingWithBids; bid: JobBid }>(`/jobboard/${jobId}/accept`, {
+    method: 'POST',
+    body: JSON.stringify({ bidId }),
+  });
+}

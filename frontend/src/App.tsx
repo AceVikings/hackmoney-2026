@@ -5,6 +5,7 @@ import LandingPage from './pages/LandingPage';
 import DashboardPage from './pages/DashboardPage';
 import AgentsPage from './pages/AgentsPage';
 import NewTaskPage from './pages/NewTaskPage';
+import JobBoardPage from './pages/JobBoardPage';
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/tasks/new" element={<NewTaskPage />} />
+          <Route path="/jobs" element={<JobBoardPage />} />
         </Routes>
       </main>
       <Footer />
