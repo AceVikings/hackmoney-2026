@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "tsx simulate.ts"
+    "start": "tsx start.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

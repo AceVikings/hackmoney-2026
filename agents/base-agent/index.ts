@@ -1,63 +1,159 @@
 import dotenv from 'dotenv';
-import { v4 as uuid } from 'uuid';
-
 dotenv.config();
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3001/api';
+const POLL_INTERVAL = parseInt(process.env.AGENT_POLL_INTERVAL_MS || '4000', 10);
 
-export class ACNAgent {
+// ── Types ────────────────────────────────────────────
+
+export interface JobPosting {
+  id: string;
+  taskId: string;
+  title: string;
+  description: string;
+  budget: number;
+  requiredSkills: string[];
+  postedAt: string;
+  status: 'open' | 'assigned' | 'closed';
+  bids: JobBidResponse[];
+}
+
+export interface JobBidResponse {
+  id: string;
+  jobId: string;
+  agentId: string;
+  agentEnsName: string;
+  message: string;
+  relevanceScore: number;
+  estimatedTime: string;
+  proposedAmount: number;
+  accepted: boolean;
+  createdAt: string;
+}
+
+export interface JobEvaluation {
+  relevanceScore: number;
+  message: string;
+  estimatedTime: string;
+  proposedAmount: number;
+}
+
+export interface TaskResult {
+  success: boolean;
+  output: any;
+  summary: string;
+}
+
+// ── Abstract Base Agent ──────────────────────────────
+
+export abstract class ACNAgent {
+  public id = '';
+  private bidJobIds = new Set<string>();
+  private pollHandle: ReturnType<typeof setInterval> | null = null;
+
   constructor(
-    public id: string,
     public ensName: string,
     public role: string,
-    private privateKey: string // In production, use Circle WaaS / KMS
+    public maxLiability: number,
   ) {}
 
-  async register() {
+  /** Skills this agent supports (lowercase tags). */
+  abstract getSkills(): string[];
+
+  /** Evaluate a job posting. Return null if not relevant. */
+  abstract evaluateJob(job: JobPosting): Promise<JobEvaluation | null>;
+
+  /** Execute accepted work. */
+  abstract executeTask(taskId: string, description: string): Promise<TaskResult>;
+
+  // ── Lifecycle ────────────────────────────────────
+
+  async register(): Promise<void> {
+    const res = await fetch(`${BACKEND_URL}/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ensName: this.ensName,
+        walletAddress: this.deriveAddress(),
+        role: this.role,
+        skills: this.getSkills(),
+        maxLiability: this.maxLiability,
+      }),
+    });
+    const data = await res.json();
+    this.id = data.id;
+    console.log(`[${this.ensName}] ✅ Registered — ID ${this.id}`);
+  }
+
+  /** Start polling the job board. */
+  start(): void {
+    console.log(`[${this.ensName}] 🔄 Polling job board every ${POLL_INTERVAL}ms`);
+    this.pollHandle = setInterval(() => this.poll(), POLL_INTERVAL);
+  }
+
+  stop(): void {
+    if (this.pollHandle) clearInterval(this.pollHandle);
+  }
+
+  // ── Internals ────────────────────────────────────
+
+  private async poll(): Promise<void> {
     try {
-      const res = await fetch(`${BACKEND_URL}/agents`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ensName: this.ensName,
-          walletAddress: this.getPublicAddress(),
-          role: this.role,
-          skills: ['autonomous', 'agentic'],
-          maxLiability: 1000,
-        }),
-      });
-      const data = await res.json();
-      console.log(`[${this.ensName}] Registered with ID: ${data.id}`);
-      this.id = data.id;
-    } catch (err) {
-      console.error(`[${this.ensName}] Registration failed`, err);
+      const res = await fetch(`${BACKEND_URL}/jobboard`);
+      const jobs: JobPosting[] = await res.json();
+
+      for (const job of jobs) {
+        if (job.status !== 'open') continue;
+        if (this.bidJobIds.has(job.id)) continue;
+
+        const evaluation = await this.evaluateJob(job);
+        if (!evaluation) {
+          console.log(`[${this.ensName}] ⏭️  Skipped job "${job.title}" (not relevant)`);
+          this.bidJobIds.add(job.id); // don't re-check
+          continue;
+        }
+
+        await this.submitBid(job.id, evaluation);
+        this.bidJobIds.add(job.id);
+      }
+    } catch {
+      // Backend may not be up yet; silently retry
     }
   }
 
-  getPublicAddress() {
-    // Mock address generation
-    return `0x${this.ensName.length}${this.id.replace(/-/g, '').slice(0, 38)}`;
+  private async submitBid(jobId: string, evaluation: JobEvaluation): Promise<void> {
+    await fetch(`${BACKEND_URL}/jobboard/${jobId}/bid`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: this.id,
+        agentEnsName: this.ensName,
+        message: evaluation.message,
+        relevanceScore: evaluation.relevanceScore,
+        estimatedTime: evaluation.estimatedTime,
+        proposedAmount: evaluation.proposedAmount,
+      }),
+    });
+    console.log(`[${this.ensName}] 📝 Bid submitted (relevance: ${evaluation.relevanceScore}%)`);
   }
 
-  async submitWork(taskId: string, result: any) {
-    console.log(`[${this.ensName}] Submitting work for task ${taskId}...`);
-    try {
-      await fetch(`${BACKEND_URL}/tasks/${taskId}/work`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          agentId: this.id,
-          result: result,
-        }),
-      });
-      console.log(`[${this.ensName}] Work submitted successfully.`);
-    } catch (err) {
-      console.error(`[${this.ensName}] Failed to submit work`, err);
-    }
+  async submitWork(taskId: string, result: TaskResult): Promise<void> {
+    await fetch(`${BACKEND_URL}/tasks/${taskId}/work`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: this.id,
+        result: result.output,
+      }),
+    });
+    console.log(`[${this.ensName}] ✅ Work submitted — ${result.summary}`);
   }
 
-  async run() {
-    console.log(`[${this.ensName}] ${this.role} is running...`);
-    // Listen for events, poll, etc.
+  private deriveAddress(): string {
+    const hash = Array.from(this.ensName)
+      .reduce((acc, c) => acc + c.charCodeAt(0), 0)
+      .toString(16)
+      .padStart(40, '0');
+    return `0x${hash}`;
   }
 }

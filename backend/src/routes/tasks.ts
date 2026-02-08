@@ -70,3 +70,61 @@ taskRouter.patch('/:id/status', (req, res) => {
   tasks.set(task.id, task);
   res.json(task);
 });
+
+// POST /api/tasks — Create a standalone task
+taskRouter.post('/', (req, res) => {
+  const { title, description, budget, creatorAddress } = req.body;
+  if (!title || !budget || !creatorAddress) {
+    res.status(400).json({ error: 'title, budget, and creatorAddress are required' });
+    return;
+  }
+  const task: Task = {
+    id: uuid(),
+    title,
+    description: description ?? '',
+    budget,
+    status: 'open',
+    creatorAddress,
+    assignedAgents: [],
+    createdAt: new Date().toISOString(),
+  };
+  tasks.set(task.id, task);
+  activities.push({
+    id: uuid(),
+    agentId: 'SYSTEM',
+    taskId: task.id,
+    action: 'TASK_CREATED',
+    timestamp: new Date().toISOString(),
+  });
+  res.status(201).json(task);
+});
+
+// POST /api/tasks/:id/work — Agent submits work results
+taskRouter.post('/:id/work', (req, res) => {
+  const task = tasks.get(req.params.id);
+  if (!task) {
+    res.status(404).json({ error: 'Task not found' });
+    return;
+  }
+  const { agentId, result } = req.body;
+  if (!agentId || result === undefined) {
+    res.status(400).json({ error: 'agentId and result are required' });
+    return;
+  }
+  if (!task.workResults) task.workResults = [];
+  task.workResults.push({
+    agentId,
+    result,
+    submittedAt: new Date().toISOString(),
+  });
+  task.status = 'review';
+  tasks.set(task.id, task);
+  activities.push({
+    id: uuid(),
+    agentId,
+    taskId: task.id,
+    action: 'WORK_SUBMITTED',
+    timestamp: new Date().toISOString(),
+  });
+  res.json(task);
+});
