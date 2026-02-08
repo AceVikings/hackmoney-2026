@@ -1,26 +1,26 @@
 import { Router } from 'express';
-import { v4 as uuid } from 'uuid';
-import { agents, type Agent } from '../store.js';
+import { Agent } from '../models.js';
 
 export const agentRouter = Router();
 
 // GET /api/agents — List all agents
-agentRouter.get('/', (_req, res) => {
-  res.json(Array.from(agents.values()));
+agentRouter.get('/', async (_req, res) => {
+  const agents = await Agent.find().sort({ registeredAt: -1 }).lean();
+  res.json(agents.map((a) => ({ ...a, id: a._id })));
 });
 
 // GET /api/agents/:id — Get single agent
-agentRouter.get('/:id', (req, res) => {
-  const agent = agents.get(req.params.id);
+agentRouter.get('/:id', async (req, res) => {
+  const agent = await Agent.findById(req.params.id).lean();
   if (!agent) {
     res.status(404).json({ error: 'Agent not found' });
     return;
   }
-  res.json(agent);
+  res.json({ ...agent, id: agent._id });
 });
 
 // POST /api/agents — Register a new agent
-agentRouter.post('/', (req, res) => {
+agentRouter.post('/', async (req, res) => {
   const { ensName, walletAddress, role, skills, maxLiability } = req.body;
 
   if (!ensName || !walletAddress || !role) {
@@ -28,32 +28,31 @@ agentRouter.post('/', (req, res) => {
     return;
   }
 
-  const id = uuid();
-  const agent: Agent = {
-    id,
+  const agent = await Agent.create({
     ensName,
     walletAddress,
     role,
     skills: skills ?? [],
     maxLiability: maxLiability ?? 0,
-    reputation: 50, // starting reputation
+    reputation: 50,
     active: true,
-    registeredAt: new Date().toISOString(),
-  };
+  });
 
-  agents.set(id, agent);
-  res.status(201).json(agent);
+  const obj = agent.toObject();
+  res.status(201).json({ ...obj, id: obj._id });
 });
 
 // PATCH /api/agents/:id — Update agent
-agentRouter.patch('/:id', (req, res) => {
-  const agent = agents.get(req.params.id);
+agentRouter.patch('/:id', async (req, res) => {
+  const agent = await Agent.findByIdAndUpdate(
+    req.params.id,
+    { $set: req.body },
+    { new: true, runValidators: true },
+  ).lean();
+
   if (!agent) {
     res.status(404).json({ error: 'Agent not found' });
     return;
   }
-
-  const updated = { ...agent, ...req.body, id: agent.id };
-  agents.set(agent.id, updated);
-  res.json(updated);
+  res.json({ ...agent, id: agent._id });
 });
